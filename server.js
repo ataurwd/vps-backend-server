@@ -47,7 +47,7 @@ app.post("/create-payment", async (req, res) => {
       tx_ref: "tx-" + Date.now(),
       amount,
       currency: "NGN",
-      redirect_url: "https://your-frontend.com/payment-success",
+      redirect_url: "http://localhost:3000/",
       customer: { email, name },
       customization: { title: "Your Store Payment", description: "Payment for items" },
     };
