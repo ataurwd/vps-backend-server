@@ -1,85 +1,120 @@
 const express = require("express");
 const cors = require("cors");
+const axios = require("axios");
 const { MongoClient, ObjectId } = require("mongodb");
+require("dotenv").config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔹 MongoDB connection
-const url = "mongodb://admin_ataur:2700418579@72.244.153.23:27017";
-const dbName = "ataurdb";
+// ==========================
+// 🔹 MongoDB Connection
+// ==========================
+const url = "mongodb://ataur_dev:2700418579@72.244.153.24:27017/admin";
+const dbName = "flutterwaveDB";
 let db;
+let paymentsCollection;
 
 MongoClient.connect(url)
   .then(async (client) => {
-    console.log("Connected to MongoDB");
+    console.log("Connected to MongoDB ✔");
     db = client.db(dbName);
 
-    // Explicit collection create (only if not exists)
-    const collections = await db.listCollections({ name: "posts" }).toArray();
+    paymentsCollection = db.collection("payments");
+
+    const collections = await db.listCollections({ name: "payments" }).toArray();
     if (collections.length === 0) {
-      await db.createCollection("posts");
-      console.log("Collection 'posts' created!");
-    } else {
-      console.log("Collection 'posts' already exists");
+      await db.createCollection("payments");
+      console.log("Collection 'payments' created!");
     }
   })
   .catch((err) => console.log("Mongo Error:", err));
 
-// 🔹 Root route
-app.get("/", (req, res) => {
-  res.send("API is running on VPS!");
-});
+// ==========================
+// 🔹 Flutterwave Config
+// ==========================
+const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY || "YOUR_FLUTTERWAVE_SECRET_KEY";
 
-// 🔹 POST route → save data in 'posts' collection
-app.post("/add-post", async (req, res) => {
+// ==========================
+// 🔹 Create Payment Route
+// ==========================
+app.post("/create-payment", async (req, res) => {
   try {
-    const { title, description } = req.body;
-    if (!title || !description) {
-      return res.status(400).json({ error: "Title and Description required" });
-    }
+    const { name, email, amount } = req.body;
 
-    const collection = db.collection("ataurpost");
-    const result = await collection.insertOne({
-      title,
-      description,
-      date: new Date(),
+    const payload = {
+      tx_ref: "tx-" + Date.now(),
+      amount,
+      currency: "NGN",
+      redirect_url: "https://your-frontend.com/payment-success",
+      customer: { email, name },
+      customization: { title: "Your Store Payment", description: "Payment for items" },
+    };
+
+    const response = await axios.post(
+      "https://api.flutterwave.com/v3/payments",
+      payload,
+      { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
+    );
+
+    await paymentsCollection.insertOne({
+      name,
+      email,
+      amount,
+      tx_ref: payload.tx_ref,
+      status: "pending",
+      createdAt: new Date(),
     });
 
-    res.json({
-      message: "Post saved successfully!",
-      data: result,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.send({ link: response.data.data.link });
+  } catch (error) {
+    res.status(500).send({ message: "Payment error", error: error.message });
   }
 });
 
-// 🔹 GET route → get all posts
-app.get("/posts", async (req, res) => {
+// ==========================
+// 🔹 Verify Payment
+// ==========================
+app.get("/verify-payment/:tx_ref", async (req, res) => {
   try {
-    const posts = await db.collection("ataurpost").find().toArray();
-    res.json(posts);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const { tx_ref } = req.params;
+
+    const response = await axios.get(
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
+      { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
+    );
+
+    const status = response.data.data.status;
+
+    await paymentsCollection.updateOne({ tx_ref }, { $set: { status } });
+
+    res.send({ message: "Payment Verified", status });
+  } catch (error) {
+    res.status(500).send({ message: "Verification error", error: error.message });
   }
 });
 
-// 🔹 GET single post by id
-app.get("/posts/:id", async (req, res) => {
+
+// to get all payments (for testing)
+app.get("/payments", async (req, res) => {
   try {
-    const id = req.params.id;
-    const post = await db.collection("ataurpost").findOne({ _id: new ObjectId(id) });
-    if (!post) return res.status(404).json({ error: "Post not found" });
-    res.json(post);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+    const payments = await paymentsCollection.find({}).toArray();
+    res.send(payments);
+  } catch (error) {
+    res.status(500).send({ message: "Error fetching payments", error: error.message });
   }
 });
 
-// 🔹 Start server
-const PORT = 3000;
+// ==========================
+// 🔹 Default Route
+// ==========================
+app.get("/", (req, res) => res.send("Flutterwave Payment API Running ✔"));
+
+// ==========================
+// 🔹 Start Server
+// ==========================
+const PORT = 3200;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
