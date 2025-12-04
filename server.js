@@ -11,7 +11,7 @@ app.use(express.json());
 // ==========================
 // 🔹 MongoDB Connection
 // ==========================
-const url = "mongodb://ataur_dev:2700418579@72.244.153.24:27017/admin";
+const url = process.env.MONGO_URI;
 const dbName = "flutterwaveDB";
 let db;
 let paymentsCollection;
