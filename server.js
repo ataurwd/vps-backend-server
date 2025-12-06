@@ -61,7 +61,7 @@ if (!FLW_SECRET_KEY || !KORAPAY_SECRET_KEY) {
 }
 
 // ==========================
-// Routes (Only after DB is connected)
+// Routes (Only after DB is conn
 // ==========================
 async function startServer() {
   await connectDB();
