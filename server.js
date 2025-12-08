@@ -11,18 +11,20 @@ const app = express();
 app.use(
   express.json({
     verify: (req, res, buf) => {
-      req.rawBody = buf.toString(); // Store raw body
+      req.rawBody = buf.toString();
     },
   })
 );
+
 app.use(cors());
 
 // ==========================
 // MongoDB Connection
 // ==========================
 const url = process.env.MONGO_URI;
+
 if (!url) {
-  console.error("MONGO_URI is missing in .env");
+  console.error("❌ MONGO_URI is missing in .env");
   process.exit(1);
 }
 
@@ -34,14 +36,17 @@ async function connectDB() {
   try {
     await client.connect();
     console.log("Connected to MongoDB ✔");
-    const db = client.db(dbName);
-    paymentsCollection = db.collection("payments");
 
-    // Create collection if not exists
-    const collections = await db.listCollections({ name: "payments" }).toArray();
-    if (collections.length === 0) {
-      await db.createCollection("payments");
-      console.log("Collection 'payments' created!");
+     paymentsCollection = client.db("flutterwaveDB").collection("payments");
+
+    // Ensure database & collection always exist
+    const count = await paymentsCollection.countDocuments();
+    if (count === 0) {
+      await paymentsCollection.insertOne({
+        _init: true,
+        createdAt: new Date(),
+      });
+      console.log("Initialized DB with default document ✔");
     }
   } catch (err) {
     console.error("MongoDB Connection Error:", err);
@@ -56,26 +61,29 @@ const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
 const KORAPAY_SECRET_KEY = process.env.KORAPAY_SECRET_KEY;
 
 if (!FLW_SECRET_KEY || !KORAPAY_SECRET_KEY) {
-  console.error("Missing FLW_SECRET_KEY or KORAPAY_SECRET_KEY in .env");
+  console.error("❌ FLW_SECRET_KEY or KORAPAY_SECRET_KEY missing in .env");
   process.exit(1);
 }
 
 // ==========================
-// Routes (Only after DB is conn
+// Start Server After DB
 // ==========================
 async function startServer() {
   await connectDB();
 
+  // ===========================================
   // Flutterwave: Create Payment
+  // ===========================================
   app.post("/create-payment", async (req, res) => {
     try {
       const { name, email, amount } = req.body;
 
       if (!name || !email || !amount) {
-        return res.status(400).json({ message: "Name, email and amount are required" });
+        return res.status(400).json({ message: "Name, email and amount required" });
       }
 
-      const tx_ref = "flw-tx-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
+      const tx_ref =
+        "flw-tx-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
 
       const payload = {
         tx_ref,
@@ -101,7 +109,7 @@ async function startServer() {
         }
       );
 
-      // Save to DB
+      // Save into DB
       await paymentsCollection.insertOne({
         name,
         email,
@@ -122,7 +130,9 @@ async function startServer() {
     }
   });
 
+  // ===========================================
   // Flutterwave: Verify Payment
+  // ===========================================
   app.get("/verify-payment/:tx_ref", async (req, res) => {
     try {
       const { tx_ref } = req.params;
@@ -134,7 +144,7 @@ async function startServer() {
         }
       );
 
-      const status = response.data.data.status; // successful, failed, pending
+      const status = response.data.data.status;
 
       await paymentsCollection.updateOne(
         { tx_ref },
@@ -144,11 +154,13 @@ async function startServer() {
       res.json({ message: "Payment verified", status });
     } catch (error) {
       console.error("Verify Error:", error.response?.data || error.message);
-      res.status(500).json({ message: "Verification failed", error: error.message });
+      res.status(500).json({ message: "Verification failed" });
     }
   });
 
-    // Korapay: Verify Payment (Manual)
+  // ===========================================
+  // KoraPay Manual Verify
+  // ===========================================
   app.get("/api/korapay/verify/:reference", async (req, res) => {
     try {
       const { reference } = req.params;
@@ -162,7 +174,7 @@ async function startServer() {
         }
       );
 
-      const status = response.data.data.status; // "success", "failed", "pending"
+      const status = response.data.data.status;
 
       await paymentsCollection.updateOne(
         { reference },
@@ -176,7 +188,9 @@ async function startServer() {
     }
   });
 
-  // Korapay: Webhook (Most Important - Must be correct)
+  // ===========================================
+  // KoraPay Webhook
+  // ===========================================
   app.post("/api/korapay/webhook", async (req, res) => {
     try {
       const signature = req.headers["x-korapay-signature"];
@@ -212,7 +226,7 @@ async function startServer() {
           }
         );
 
-        console.log(`Webhook processed: ${reference} -> ${status}`);
+        console.log(`Webhook processed: ${reference} → ${status}`);
       }
 
       res.status(200).send("OK");
@@ -222,7 +236,9 @@ async function startServer() {
     }
   });
 
-  // Korapay: Initialize Payment
+  // ===========================================
+  // KoraPay Create Payment
+  // ===========================================
   app.post("/api/korapay/create-payment", async (req, res) => {
     try {
       const { amount, user } = req.body;
@@ -231,7 +247,8 @@ async function startServer() {
         return res.status(400).json({ message: "Invalid request data" });
       }
 
-      const reference = "kora-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
+      const reference =
+        "kora-" + Date.now() + "-" + Math.random().toString(36).substr(2, 9);
 
       const payload = {
         amount: Number(amount),
@@ -242,7 +259,7 @@ async function startServer() {
           name: user.name,
           email: user.email,
         },
-        notification_url: "http://localhost:3000/api/korapay/webhook", // Change in production
+        notification_url: "http://localhost:3200/api/korapay/webhook",
       };
 
       const response = await axios.post(
@@ -279,18 +296,24 @@ async function startServer() {
     }
   });
 
-
-  // Get all payments (for testing)
+  // ===========================================
+  // All Payments
+  // ===========================================
   app.get("/payments", async (req, res) => {
     try {
-      const payments = await paymentsCollection.find({}).sort({ createdAt: -1 }).toArray();
+      const payments = await paymentsCollection
+        .find({})
+        .toArray();
+
       res.json(payments);
     } catch (error) {
       res.status(500).json({ message: "Error fetching payments" });
     }
   });
 
-  // Home route
+  // ===========================================
+  // Home Route
+  // ===========================================
   app.get("/", (req, res) => {
     res.send("Payment Gateway API Running - Flutterwave + KoraPay");
   });
@@ -298,7 +321,7 @@ async function startServer() {
   // Start server
   const PORT = process.env.PORT || 3200;
   app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
   });
 }
 
