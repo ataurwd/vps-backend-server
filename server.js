@@ -1,41 +1,69 @@
-
+// =======================================
+// server.js (FULLY FIXED & CLEAN VERSION)
+// =======================================
 
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
+const { MongoClient } = require("mongodb");
 
 const app = express();
 
-// Raw body for Korapay webhook
-app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf.toString();
-  }
-}));
+// Enable normal JSON body + rawBody for Korapay webhooks
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf.toString();
+    },
+  })
+);
 
 app.use(cors());
 
-// Load payment modules
+
+// ---------------------------
+// 💾 DATABASE CONNECTION
+// ---------------------------
+const MONGO_URI = process.env.MONGO_URI;
+const client = new MongoClient(MONGO_URI);
+
+let payments; // collection instance
+
+async function connectDB() {
+  try {
+    await client.connect();
+    const db = client.db("flutterwaveDB");
+    payments = db.collection("payments");
+    console.log("📦 MongoDB Connected Successfully");
+  } catch (err) {
+    console.error("❌ MongoDB Error:", err);
+  }
+}
+connectDB();
+
+
+// ---------------------------
+// PAYMENT ROUTES
+// ---------------------------
 const flutterwaveRoutes = require("./flutterwave");
 const korapayRoutes = require("./korapay");
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
 
+
+// ---------------------------
+// ROOT CHECK
+// ---------------------------
 app.get("/", (req, res) => {
   res.send("Payment API Running ✔");
 });
 
 
-// to get all payment data
-const { MongoClient } = require("mongodb");
-const MONGO_URI = process.env.MONGO_URI;
-const client = new MongoClient(MONGO_URI);
-const db = client.db("flutterwaveDB");
-const payments = db.collection("payments");
-(async () => await client.connect())();
-
-app.get("/payments", async (req, res) => {  
+// ---------------------------
+// GET ALL PAYMENTS
+// ---------------------------
+app.get("/payments", async (req, res) => {
   try {
     const allPayments = await payments.find({}).toArray();
     res.json(allPayments);
@@ -44,64 +72,45 @@ app.get("/payments", async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3200;
-app.listen(PORT, () => console.log(`🚀 Server Running on ${PORT}`));
 
-
-
-/////////////////////////////////////
-//////////////////////////////////
-//SABBA //
-///////////////////////////////
-//////////////////////
-/////////////
-//////////
-// server.js - add this block (after your /payments route)
-// make sure these middlewares exist somewhere before routes:
-const express = require("express");
-const cors = require("cors");
-
-
-app.use(cors());            // allow cross-origin requests
-app.use(express.json());    // parse JSON bodies
-
-// existing DB setup...
-// const payments = <your mongo collection instance>
-
+// ====================================================================
+// 🚀 NEW FIXED: POST /api/submit  (this had errors earlier)
+// ====================================================================
 app.post("/api/submit", async (req, res) => {
   try {
-    // now reading name and transactionId from req.body
     const { paymentMethod, name, transactionId, message, submittedAt } = req.body;
 
-    // Validate required fields
+    // Required field check
     if (!paymentMethod) {
       return res.status(400).json({
         error: "paymentMethod is required",
       });
     }
 
-    // Build document (keep defaults for missing optional fields)
+    // Build DB document
     const doc = {
       paymentMethod,
       name: name || null,
       transactionId: transactionId || null,
       message: message || null,
       submittedAt: submittedAt ? new Date(submittedAt) : new Date(),
-      status: "created",
+      status: "Pending",
       meta: {},
       createdAt: new Date(),
       updatedAt: new Date(),
     };
 
-    const result = await payments.insertOne(doc); // or PaymentModel.create(doc) if using Mongoose
-
+    const result = await payments.insertOne(doc);
     const paymentId = result.insertedId;
 
-    // optional: generate a payment URL (if needed)
     const paymentUrl = `https://example.com/pay/${paymentId}`;
 
-    // debug log (helps during dev)
-    console.log("Saved payment:", { paymentId, paymentMethod, name, transactionId });
+    console.log("💾 Saved Payment:", {
+      paymentId,
+      paymentMethod,
+      name,
+      transactionId,
+    });
 
     res.json({
       message: "Payment record created successfully",
@@ -109,51 +118,14 @@ app.post("/api/submit", async (req, res) => {
       paymentUrl,
     });
   } catch (err) {
-    console.error("Error in /api/submit:", err);
+    console.error("❌ Error in /api/submit:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
 
-
-
-
-
-// GET /api/submit - receive data from frontend through query params
-// app.get("/api/submit", async (req, res) => {
-//   try {
-//     const { paymentMethod, message, submittedAt } = req.query;
-
-//     if (!paymentMethod) {
-//       return res.status(400).json({ error: "paymentMethod is required" });
-//     }
-
-//     const doc = {
-//       paymentMethod,
-//       message: message || null,
-//       submittedAt: submittedAt || new Date().toISOString(),
-//       status: "created",
-//       meta: {},
-//       createdAt: new Date(),
-//       updatedAt: new Date(),
-//     };
-
-//     const result = await payments.insertOne(doc);
-
-//     res.json({
-//       message: "Payment record created successfully (GET)",
-//       paymentId: result.insertedId,
-//     });
-//   } catch (err) {
-//     console.error("GET /api/submit error:", err);
-//     res.status(500).json({ error: "Internal Server Error" });
-//   }
-// });
-
-
-// app.get("/api/submit", async (req, res) => {
-//   console.log("GET /api/submit - req.query:", req.query);
-//   const { paymentMethod, message, submittedAt } = req.query;
-//   if (!paymentMethod) return res.status(400).json({ error: "paymentMethod is required" });
-//   // ... continue saving to DB ...
-// });
+// ---------------------------
+// START SERVER
+// ---------------------------
+const PORT = process.env.PORT || 3200;
+app.listen(PORT, () => console.log(`🚀 Server Running on ${PORT}`));
