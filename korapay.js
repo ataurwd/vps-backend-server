@@ -39,14 +39,6 @@ router.post("/create", async (req, res) => {
       }
     );
 
-    await payments.insertOne({
-      ...user,
-      amount,
-      reference,
-      provider: "korapay",
-      status: "pending",
-      createdAt: new Date(),
-    });
 
     res.json({ checkoutUrl: kpRes.data.data.checkout_url, reference });
   } catch (err) {

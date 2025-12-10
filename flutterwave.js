@@ -37,16 +37,6 @@ router.post("/create", async (req, res) => {
       }
     );
 
-    await payments.insertOne({
-      name,
-      email,
-      amount,
-      tx_ref,
-      provider: "flutterwave",
-      status: "pending",
-      createdAt: new Date(),
-    });
-
     res.json({
       link: flwRes.data.data.link,
       tx_ref,
