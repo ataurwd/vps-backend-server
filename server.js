@@ -20,7 +20,8 @@ app.use(
 
 app.use(cors());
 
-
+const userRoute = require('./routes/user');
+app.use("/api/user", userRoute);
 // ---------------------------
 // 💾 DATABASE CONNECTION
 // ---------------------------
@@ -32,7 +33,7 @@ let payments; // collection instance
 async function connectDB() {
   try {
     await client.connect();
-    const db = client.db("flutterwaveDB");
+    const db = client.db("mydb");
     payments = db.collection("payments");
     console.log("📦 MongoDB Connected Successfully");
   } catch (err) {

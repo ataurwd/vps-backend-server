@@ -18,7 +18,7 @@ let paymentsCollection = null;
 async function connectOnce() {
   if (!paymentsCollection) {
     await client.connect();
-    const db = client.db("flutterwaveDB");
+    const db = client.db("mydb");
     paymentsCollection = db.collection("payments");
     // Optionally create indexes
     await paymentsCollection.createIndex({ tx_ref: 1 }, { unique: false }).catch(()=>{});
