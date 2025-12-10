@@ -26,5 +26,25 @@ router.get("/getall", async (req, res) => {
     const allUsers = await users.find({}).toArray();
     res.send(allUsers);
 });
+router.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+
+    const user = await users.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (user.password !== password) {
+      return res.status(400).json({ success: false, message: "Wrong password" });
+    }
+
+    res.json({
+      success: true,
+      message: "Login successful",
+      user,
+    });
+
+});
 
 module.exports = router;
