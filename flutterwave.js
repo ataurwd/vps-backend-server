@@ -25,7 +25,7 @@ router.post("/create", async (req, res) => {
       tx_ref,
       amount,
       currency: "NGN",
-      redirect_url: "http://localhost:3000/payment-success",
+      redirect_url: "http://localhost:8265/payment-done",
       customer: { email, name },
     };
 

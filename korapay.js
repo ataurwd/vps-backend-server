@@ -26,7 +26,7 @@ router.post("/create", async (req, res) => {
       amount,
       currency: "NGN",
       reference,
-      redirect_url: "http://localhost:3000/",
+      redirect_url: "http://localhost:8265/payment-done",
       customer: user,
       notification_url: "http://localhost:3200/korapay/webhook"
     };
