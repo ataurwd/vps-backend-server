@@ -26,6 +26,8 @@ router.get("/getall", async (req, res) => {
     const allUsers = await users.find({}).toArray();
     res.send(allUsers);
 });
+
+
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
