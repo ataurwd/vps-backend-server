@@ -20,8 +20,7 @@ app.use(
 
 app.use(cors());
 
-const userRoute = require('./routes/user');
-app.use("/api/user", userRoute);
+
 // ---------------------------
 // 💾 DATABASE CONNECTION
 // ---------------------------
@@ -43,14 +42,21 @@ async function connectDB() {
 connectDB();
 
 
+
+
 // ---------------------------
-// PAYMENT ROUTES
+//  ROUTES
 // ---------------------------
 const flutterwaveRoutes = require("./flutterwave");
 const korapayRoutes = require("./korapay");
+const userRoute = require('./routes/user');
+const notificationRoute = require('./routes/notification')
+
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
+app.use("/api/user", userRoute);
+app.use("/api/notification", notificationRoute);
 
 
 // ---------------------------
