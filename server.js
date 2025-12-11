@@ -80,6 +80,7 @@ app.get("/payments", async (req, res) => {
 });
 
 
+
 // ====================================================================
 // 🚀 NEW FIXED: POST /api/submit  (this had errors earlier)
 // ====================================================================
@@ -136,3 +137,28 @@ app.post("/api/submit", async (req, res) => {
 // ---------------------------
 const PORT = process.env.PORT || 3200;
 app.listen(PORT, () => console.log(`🚀 Server Running on ${PORT}`));
+
+
+
+///////////////////// --------Sabba---------//////////////////////
+
+
+async function connectDB() {
+  try {
+    await client.connect();
+    const db = client.db("mydb");
+
+    // collections
+    payments = db.collection("payments");
+    const notifications = db.collection("notifications");
+
+    // expose to routes via app.set (so routes can get with req.app.get('notifications'))
+    app.set("payments", payments);
+    app.set("notifications", notifications);
+
+    console.log("📦 MongoDB Connected Successfully");
+  } catch (err) {
+    console.error("❌ MongoDB Error:", err);
+  }
+}
+connectDB();
