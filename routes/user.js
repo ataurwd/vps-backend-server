@@ -22,6 +22,7 @@ router.post("/register", async (req, res) => {
 })
 
 // to get all users data
+// API: /api/user/getall
 router.get("/getall", async (req, res) => {
     const allUsers = await users.find({}).toArray();
     res.send(allUsers);

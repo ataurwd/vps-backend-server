@@ -51,13 +51,13 @@ const flutterwaveRoutes = require("./flutterwave");
 const korapayRoutes = require("./korapay");
 const userRoute = require('./routes/user');
 const notificationRoute = require('./routes/notification')
-
+const allProduct = require('./routes/product')
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
 app.use("/api/user", userRoute);
 app.use("/api/notification", notificationRoute);
-
+app.use("/product", allProduct)
 
 // ---------------------------
 // ROOT CHECK
@@ -70,14 +70,7 @@ app.get("/", (req, res) => {
 // ---------------------------
 // GET ALL PAYMENTS
 // ---------------------------
-app.get("/payments", async (req, res) => {
-  try {
-    const allPayments = await payments.find({}).toArray();
-    res.json(allPayments);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+
 
 
 
@@ -131,6 +124,14 @@ app.post("/api/submit", async (req, res) => {
   }
 });
 
+app.get("/payments", async (req, res) => {
+  try {
+    const allPayments = await payments.find({}).toArray();
+    res.json(allPayments);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ---------------------------
 // START SERVER
