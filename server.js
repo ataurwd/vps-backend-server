@@ -55,6 +55,7 @@ const userRoute = require('./routes/user');
 const notificationRoute = require('./routes/notification')
 const allProduct = require('./routes/product')
 const chat = require('./routes/chat')
+const cart = require('./routes/cart')
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
@@ -62,6 +63,7 @@ app.use("/api/user", userRoute);
 app.use("/api/notification", notificationRoute);
 app.use("/product", allProduct)
 app.use("/chat", chat)
+app.use("/cart", cart)
 
 // ---------------------------
 // ROOT CHECK
