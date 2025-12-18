@@ -34,6 +34,7 @@ async function connectDB() {
     await client.connect();
     const db = client.db("mydb");
     payments = db.collection("payments");
+    iconsdb = db.collection("icons")
     console.log("📦 MongoDB Connected Successfully");
   } catch (err) {
     console.error("❌ MongoDB Error:", err);
@@ -188,35 +189,32 @@ app.patch("/payments/:id", async (req, res) => {
   });
 });
 
+// get all icons collection
+app.get("/icon-data", async (req, res) => {
+  try {
+    const data = await iconsdb.find({}).toArray();
+
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Error fetching icon data:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch icon data",
+    });
+  }
+});
+
+
+
+// to get all data fron icons collection
 
 // ---------------------------
 // START SERVER
 // ---------------------------
 const PORT = process.env.PORT || 3200;
 app.listen(PORT, () => console.log(`🚀 Server Running on ${PORT}`));
-
-
-
-
-///////////////////// --------Sabba---------//////////////////////
-
-
-// async function connectDB() {
-//   try {
-//     await client.connect();
-//     const db = client.db("mydb");
-
-//     // collections
-//     payments = db.collection("payments");
-//     const notifications = db.collection("notifications");
-
-//     // expose to routes via app.set (so routes can get with req.app.get('notifications'))
-//     app.set("payments", payments);
-//     app.set("notifications", notifications);
-
-//     console.log("📦 MongoDB Connected Successfully");
-//   } catch (err) {
-//     console.error("❌ MongoDB Error:", err);
-//   }
-// }
-// connectDB();
