@@ -81,4 +81,22 @@ router.patch("/update-status/:id", async (req, res) => {
     }
 });
 
+
+
+// DELETE API
+router.delete("/delete/:id", async (req, res) => {
+    const id = req.params.id;
+    try {
+        const result = await productCollection.deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount > 0) {
+            res.status(200).send({ message: "Deleted successfully" });
+        } else {
+            res.status(404).send({ message: "Not found" });
+        }
+    } catch (error) {
+        res.status(500).send({ message: "Server error" });
+    }
+});
+
+
 module.exports = router;
