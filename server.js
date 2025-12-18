@@ -18,8 +18,13 @@ app.use(
   })
 );
 
-app.use(cors());
-
+app.use(
+  cors({
+    origin: "https://vps-backend-server-mbvk-ez7lsa84z.vercel.app",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
 
 // ---------------------------
 // 💾 DATABASE CONNECTION

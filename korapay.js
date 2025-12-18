@@ -28,7 +28,7 @@ router.post("/create", async (req, res) => {
       reference,
       redirect_url: "http://localhost:3000/payment-done",
       customer: user,
-      notification_url: "http://localhost:3200/korapay/webhook"
+      notification_url: "http://localhost:3000/korapay/webhook"
     };
 
     const kpRes = await axios.post(
