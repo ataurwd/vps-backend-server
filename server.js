@@ -5,7 +5,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-const { MongoClient } = require("mongodb");
+const { MongoClient, ObjectId } = require("mongodb");
 
 const app = express();
 
@@ -134,6 +134,60 @@ app.get("/payments", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+
+// get single data based on the id
+app.get("/payments/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const payment = await payments.findOne({ _id: new ObjectId(id) });
+
+  if (!payment) {
+    return res.status(404).json({
+      success: false,
+      message: "Payment not found",
+    });
+  }
+
+  res.json(payment);
+});
+
+
+// edit status
+app.patch("/payments/:id", async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({
+      success: false,
+      message: "Status is required",
+    });
+  }
+
+  const result = await payments.updateOne(
+    { _id: new ObjectId(id) },
+    {
+      $set: {
+        status,
+        "meta.updatedAt": new Date(),
+      },
+    }
+  );
+
+  if (result.matchedCount === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Payment not found",
+    });
+  }
+
+  res.json({
+    success: true,
+    message: "Payment status updated successfully",
+  });
+});
+
 
 // ---------------------------
 // START SERVER
