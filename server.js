@@ -35,6 +35,7 @@ async function connectDB() {
     const db = client.db("mydb");
     payments = db.collection("payments");
     iconsdb = db.collection("icons")
+    userCollection = db.collection("userCollection");
     console.log("📦 MongoDB Connected Successfully");
   } catch (err) {
     console.error("❌ MongoDB Error:", err);
@@ -81,50 +82,9 @@ app.get("/", (req, res) => {
 // 🚀 NEW FIXED: POST /api/submit  (this had errors earlier)
 // ====================================================================
 app.post("/api/submit", async (req, res) => {
-  try {
-    const { paymentMethod, name, transactionId, message, submittedAt } = req.body;
-
-    // Required field check
-    if (!paymentMethod) {
-      return res.status(400).json({
-        error: "paymentMethod is required",
-      });
-    }
-
-    // Build DB document
-    const doc = {
-      paymentMethod,
-      name: name || null,
-      transactionId: transactionId || null,
-      message: message || null,
-      submittedAt: submittedAt ? new Date(submittedAt) : new Date(),
-      status: "Pending",
-      meta: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    const result = await payments.insertOne(doc);
-    const paymentId = result.insertedId;
-
-    const paymentUrl = `https://example.com/pay/${paymentId}`;
-
-    console.log("💾 Saved Payment:", {
-      paymentId,
-      paymentMethod,
-      name,
-      transactionId,
-    });
-
-    res.json({
-      message: "Payment record created successfully",
-      paymentId,
-      paymentUrl,
-    });
-  } catch (err) {
-    console.error("❌ Error in /api/submit:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+  const data = req.body
+  const result = await payments.insertOne(data);
+  res.send(result)
 });
 
 app.get("/payments", async (req, res) => {
@@ -154,40 +114,78 @@ app.get("/payments/:id", async (req, res) => {
 });
 
 
-// edit status
+
+// complete payment after approved
 app.patch("/payments/:id", async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
 
-  if (!status) {
-    return res.status(400).json({
-      success: false,
-      message: "Status is required",
-    });
-  }
-
-  const result = await payments.updateOne(
-    { _id: new ObjectId(id) },
-    {
-      $set: {
-        status,
-        "meta.updatedAt": new Date(),
-      },
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: "Status is required",
+      });
     }
-  );
 
-  if (result.matchedCount === 0) {
-    return res.status(404).json({
+    // 1️⃣ payment খুঁজে বের করি
+    const payment = await payments.findOne({ _id: new ObjectId(id) });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment not found",
+      });
+    }
+
+    // 2️⃣ payment status update
+    await payments.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          status,
+          "meta.updatedAt": new Date(),
+        },
+      }
+    );
+
+    // 3️⃣ যদি Approved হয় → user balance update
+    if (status === "Approved") {
+      const user = await userCollection.findOne({ email: payment.email });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found for this payment",
+        });
+      }
+
+      await userCollection.updateOne(
+        { _id: user._id },
+        {
+          $inc: {
+            balance: Number(payment.amount), // 🔥 amount add হচ্ছে
+          },
+        }
+      );
+    }
+
+    res.json({
+      success: true,
+      message:
+        status === "Approved"
+          ? "Payment approved & user balance updated"
+          : "Payment status updated",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
       success: false,
-      message: "Payment not found",
+      message: "Internal server error",
     });
   }
-
-  res.json({
-    success: true,
-    message: "Payment status updated successfully",
-  });
 });
+
 
 // get all icons collection
 app.get("/icon-data", async (req, res) => {
