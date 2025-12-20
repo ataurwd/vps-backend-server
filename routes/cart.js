@@ -22,6 +22,11 @@ router.post("/post", async (req, res) => {
 })
 
 
+// ai endpoint =======/cart/getall
+router.get("/getall", async (req, res) => {
+     const notifications = await cartCollectoin.find({}).toArray();
+  res.send(notifications);
+})
 
 
 module.exports = router;
