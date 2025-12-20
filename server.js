@@ -433,6 +433,19 @@ app.get("/icon-data", async (req, res) => {
   }
 });
 
+
+
+// ---------------------------------------
+// LOCAL DEV SERVER (ONLY FOR LOCAL)
+// ---------------------------------------
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 3200;
+  app.listen(PORT, () => {
+    console.log(`🚀 Local server running at http://localhost:${PORT}`);
+  });
+}
+
+
 // ---------------------------------------
 // EXPORT FOR VERCEL
 // ---------------------------------------
