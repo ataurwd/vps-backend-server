@@ -29,7 +29,7 @@ async function connectToDatabase() {
     client = new MongoClient(MONGO_URI);
     await client.connect();
     db = client.db('mydb'); // Database name: mydb
-    collection = db.collection('testpayment'); // Collection name: testpayment
+    collection = db.collection('payments'); // Collection name: payments
     console.log('Connected to MongoDB - Database: mydb, Collection: testpayment');
   } catch (error) {
     console.error('MongoDB connection failed:', error);
