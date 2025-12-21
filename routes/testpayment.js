@@ -92,16 +92,12 @@ app.post('/webhook/flutterwave', async (req, res) => {
   res.status(200).send('OK');
 });
 
-// Test route
-app.get('/api', (req, res) => {
-  res.json({
-    message: 'Flutterwave API Backend Running',
-    endpoints: {
-      verify: 'POST /api/verify-payment',
-      webhook: 'POST /api/webhook/flutterwave',
-    },
-  });
+// to get all payments data
+app.get('/payments', async (req, res) => {
+  const allPayments = await collection.find({}).toArray();
+  res.send(allPayments);
 });
+
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
