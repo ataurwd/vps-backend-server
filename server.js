@@ -309,7 +309,9 @@ const notificationRoute = require("./routes/notification");
 const productRoute = require("./routes/product");
 const chatRoute = require("./routes/chat");
 const cartRoute = require("./routes/cart");
+const testPaymentRoute = require("./routes/testpayment");
 
+app.use("/api", testPaymentRoute);
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
 app.use("/api/user", userRoute);
@@ -444,6 +446,7 @@ if (process.env.NODE_ENV !== "production") {
     console.log(`🚀 Local server running at http://localhost:${PORT}`);
   });
 }
+
 
 
 // ---------------------------------------
