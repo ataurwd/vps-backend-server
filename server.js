@@ -311,9 +311,8 @@ const chatRoute = require("./routes/chat");
 const cartRoute = require("./routes/cart");
 const testPaymentRoute = require("./routes/testpayment");
 const withdrawRoute = require("./routes/withdraw");
-app.use("/withdraw", withdrawRoute);
+const purchaseRoute = require("./routes/purchase");
 
-app.use("/api", testPaymentRoute);
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
 app.use("/api/user", userRoute);
@@ -321,6 +320,9 @@ app.use("/api/notification", notificationRoute);
 app.use("/product", productRoute);
 app.use("/chat", chatRoute);
 app.use("/cart", cartRoute);
+app.use("/api", testPaymentRoute);
+app.use("/withdraw", withdrawRoute);
+app.use("/purchase", purchaseRoute);
 
 // ---------------------------------------
 // PAYMENTS API
