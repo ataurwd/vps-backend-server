@@ -25,5 +25,24 @@ router.get("/getall", async (req, res) => {
   res.send(notifications);
 });
 
+// ... (আপনার আগের কোড) ...
+
+// DELETE: Clear all notifications for a specific user
+router.delete("/clear-all/:email", async (req, res) => {
+  const email = req.params.email;
+  
+  if (!email) {
+    return res.status(400).json({ error: "Email is required" });
+  }
+
+  try {
+    const result = await notification.deleteMany({ userEmail: email });
+    res.json({ success: true, deletedCount: result.deletedCount });
+  } catch (err) {
+    console.error("Clear All Error:", err);
+    res.status(500).json({ error: "Failed to clear notifications" });
+  }
+});
+
 
 module.exports = router;
