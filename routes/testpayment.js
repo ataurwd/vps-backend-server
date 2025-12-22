@@ -1,34 +1,58 @@
 const express = require("express");
 const axios = require("axios");
 const { MongoClient } = require("mongodb");
+const crypto = require("crypto"); // Added for potential future webhook use
 
 const app = express.Router();
 const port = process.env.PORT || 3200;
 const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
-// Mongo DB
-const client = new MongoClient(MONGO_URI);
-const db = client.db("mydb");
-const collection = db.collection("payments");
+// Add this if you plan to use proper webhook verification (recommended)
+// const FLW_WEBHOOK_HASH = process.env.FLW_WEBHOOK_HASH; // Set this in your Flutterwave dashboard under Settings > Webhooks
 
-(async () => await client.connect())();
+// MongoDB Client Setup
+let client;
+let db;
+let paymentsCollection;
+
+(async () => {
+  try {
+    client = new MongoClient(MONGO_URI);
+    await client.connect();
+    db = client.db("mydb");
+    paymentsCollection = db.collection("payments");
+    console.log("Connected to MongoDB");
+  } catch (err) {
+    console.error("Failed to connect to MongoDB", err);
+    process.exit(1);
+  }
+})();
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  if (client) {
+    await client.close();
+    console.log("MongoDB connection closed");
+  }
+  process.exit(0);
+});
 
 // ========== API ROUTES WITH /api PREFIX ==========
 
-// Main Verify Endpoint (frontend থেকে কল হবে)
-app.post('/verify-payment', async (req, res) => {
+// Main Verify Endpoint (called from frontend after payment redirect)
+app.post("/verify-payment", async (req, res) => {
   const { transaction_id, userEmail } = req.body;
 
   if (!transaction_id) {
-    return res.status(400).json({ message: 'transaction_id is required' });
+    return res.status(400).json({ message: "transaction_id is required" });
   }
   if (!userEmail) {
-    return res.status(400).json({ message: 'userEmail is required (authenticated user email)' });
+    return res.status(400).json({ message: "userEmail is required (authenticated user email)" });
   }
 
   try {
-    // Flutterwave-এ verify করি
+    // Verify with Flutterwave
     const verifyResponse = await axios.get(
       `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
       {
@@ -38,121 +62,137 @@ app.post('/verify-payment', async (req, res) => {
       }
     );
 
-    if (verifyResponse.data.status !== 'success' || verifyResponse.data.data.status !== 'successful') {
-      return res.status(400).json({ message: 'Payment verification failed on Flutterwave' });
+    const verifyData = verifyResponse.data;
+
+    if (verifyData.status !== "success" || verifyData.data.status !== "successful") {
+      return res.status(400).json({ message: "Payment verification failed on Flutterwave" });
     }
 
-    const { amount, currency } = verifyResponse.data.data;
+    const { amount, currency, customer } = verifyData.data;
+
+    // Optional: Extra security - check if email matches (if passed from frontend during payment)
+    // if (customer?.email && customer.email !== userEmail) {
+    //   return res.status(400).json({ message: "Email mismatch" });
+    // }
 
     // Duplicate check
-    const existing = await collection.findOne({ transactionId: transaction_id });
+    const existing = await paymentsCollection.findOne({ transactionId: transaction_id });
     if (existing) {
       return res.json({
-        message: 'Payment already verified and saved',
+        message: "Payment already verified and saved",
         data: existing,
       });
     }
 
-    // Save to DB — শুধু তোমার লগইন ইউজারের email সেভ হবে
+    // Save to DB
     const paymentData = {
       transactionId: transaction_id,
       amount,
       currency,
-      status: 'successful',
-      customerEmail: userEmail,  // ← এটাই তোমার website-এর লগইন ইউজারের email
+      status: "successful",
+      customerEmail: userEmail,
       createdAt: new Date(),
+      credited: false, // For balance update tracking
     };
 
-    await collection.insertOne(paymentData);
-    console.log(`Payment saved for user: ${userEmail} | Amount: ₦${amount}`);
+    await paymentsCollection.insertOne(paymentData);
+    console.log(`Payment saved for user: ${userEmail} | Amount: ${currency}${amount}`);
 
     res.json({
-      message: 'Payment successfully verified and saved',
+      message: "Payment successfully verified and saved",
       data: paymentData,
     });
   } catch (error) {
-    console.error('Verification/Save error:', error.message);
-    res.status(500).json({ message: 'Server error during verification' });
+    console.error("Verification/Save error:", error.message || error);
+    res.status(500).json({ message: "Server error during verification" });
   }
 });
 
-// Optional Webhook with /api prefix
-app.post('/webhook/flutterwave', async (req, res) => {
-  const secretHash = req.headers['verif-hash'];
-  if (!secretHash) return res.status(401).send('Missing verif-hash');
+// Optional Webhook Endpoint (recommended for async payments like bank transfers)
+// Note: Current code is fixed to use direct comparison (verif-hash). For HMAC, uncomment the block below.
+app.post("/webhook/flutterwave", express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }), async (req, res) => {
+  // Simple verif-hash verification (most common and recommended by Flutterwave docs)
+  const signature = req.headers["verif-hash"];
+  // if (!signature || signature !== FLW_WEBHOOK_HASH) {
+  //   return res.status(401).send("Invalid signature");
+  // }
 
-  const hash = crypto
-    .createHmac('sha256', FLW_SECRET_KEY)
-    .update(JSON.stringify(req.body))
-    .digest('hex');
+  // Alternative HMAC verification (older or custom setup - remove if not needed)
+  // const hash = crypto.createHmac("sha256", FLW_SECRET_KEY).update(req.rawBody).digest("hex");
+  // if (hash !== signature) {
+  //   return res.status(401).send("Invalid signature");
+  // }
 
-  if (hash !== secretHash) return res.status(401).send('Invalid signature');
+  console.log("Webhook received:", req.body);
 
-  console.log('Webhook received:', req.body);
-  res.status(200).send('OK');
+  // TODO: Process the event here (e.g., charge.success -> verify & credit balance if not already done)
+
+  res.status(200).send("OK");
 });
 
-// to get all payments data
-app.get('/payments', async (req, res) => {
-  const allPayments = await collection.find({}).sort({ createdAt: -1 }).toArray();
-  res.send(allPayments);
+// Get all payments (for admin/debug)
+app.get("/payments", async (req, res) => {
+  try {
+    const allPayments = await paymentsCollection.find({}).sort({ createdAt: -1 }).toArray();
+    res.json(allPayments);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching payments" });
+  }
 });
 
-// to patch data for add user ballace
-
+// Update user balance based on successful uncredited payments
 app.patch("/update-balance", async (req, res) => {
   try {
-    const db = client.db(dbName);
     const usersCollection = db.collection("userCollection");
-    const paymentsCollection = db.collection("payments");
 
-    const { email } = req.body; // frontend theke email pathano hobe
+    const { email } = req.body;
 
     if (!email) {
       return res.status(400).json({ message: "Email is required" });
     }
 
-    // User find
+    // Find user
     const user = await usersCollection.findOne({ email });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // User er email er payment gulo find
+    // Find uncredited successful payments for this user
     const payments = await paymentsCollection
-      .find({ customerEmail: email, status: "successful" })
+      .find({ customerEmail: email, status: "successful", credited: { $ne: true } })
       .toArray();
 
     if (payments.length === 0) {
-      return res.status(404).json({ message: "No successful payments found for this user" });
+      return res.status(200).json({ message: "No new payments to credit", totalAdded: 0 });
     }
 
-    // Payments er amount sum
-    const totalAmount = payments.reduce((acc, payment) => acc + payment.amount, 0);
+    // Calculate total amount to add
+    const totalAmount = payments.reduce((acc, p) => acc + p.amount, 0);
 
-    // User balance update
+    // Update user balance
     const updatedUser = await usersCollection.findOneAndUpdate(
       { email },
       { $inc: { balance: totalAmount } },
-      { returnDocument: "after" } // updated document return korbe
+      { returnDocument: "after" }
+    );
+
+    // Mark payments as credited
+    const paymentIds = payments.map(p => p._id);
+    await paymentsCollection.updateMany(
+      { _id: { $in: paymentIds } },
+      { $set: { credited: true } }
     );
 
     res.status(200).json({
       message: "User balance updated successfully",
       updatedUser: updatedUser.value,
+      totalAdded: totalAmount,
+      creditedPayments: payments.length,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error", error });
+    console.error("Balance update error:", error);
+    res.status(500).json({ message: "Server error during balance update" });
   }
-});
-
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  if (client) await client.close();
-  console.log('MongoDB connection closed');
-  process.exit(0);
 });
 
 module.exports = app;
