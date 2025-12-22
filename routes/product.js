@@ -39,14 +39,16 @@ router.post("/sell", async (req, res) => {
     }
 });
 
+
 router.get("/all-sells", async (req, res) => {
     try {
-        const allData = await productCollection.find({}).toArray();
+        const allData = await productCollection.find({}).sort({ _id: -1 }).toArray();
         res.status(200).send(allData);
     } catch (error) {
         res.status(500).send({ message: "Error fetching products" });
     }
 });
+
 router.patch("/update-status/:id", async (req, res) => {
     const id = req.params.id;
     const { status, rejectReason } = req.body;
