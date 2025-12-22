@@ -310,6 +310,8 @@ const productRoute = require("./routes/product");
 const chatRoute = require("./routes/chat");
 const cartRoute = require("./routes/cart");
 const testPaymentRoute = require("./routes/testpayment");
+const withdrawRoute = require("./routes/withdraw");
+app.use("/withdraw", withdrawRoute);
 
 app.use("/api", testPaymentRoute);
 app.use("/flutterwave", flutterwaveRoutes);

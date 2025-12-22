@@ -94,8 +94,57 @@ app.post('/webhook/flutterwave', async (req, res) => {
 
 // to get all payments data
 app.get('/payments', async (req, res) => {
-  const allPayments = await collection.find({}).toArray();
+  const allPayments = await collection.find({}).sort({ createdAt: -1 }).toArray();
   res.send(allPayments);
+});
+
+// to patch data for add user ballace
+
+app.patch("/update-balance", async (req, res) => {
+  try {
+    const db = client.db(dbName);
+    const usersCollection = db.collection("userCollection");
+    const paymentsCollection = db.collection("payments");
+
+    const { email } = req.body; // frontend theke email pathano hobe
+
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
+    }
+
+    // User find
+    const user = await usersCollection.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // User er email er payment gulo find
+    const payments = await paymentsCollection
+      .find({ customerEmail: email, status: "successful" })
+      .toArray();
+
+    if (payments.length === 0) {
+      return res.status(404).json({ message: "No successful payments found for this user" });
+    }
+
+    // Payments er amount sum
+    const totalAmount = payments.reduce((acc, payment) => acc + payment.amount, 0);
+
+    // User balance update
+    const updatedUser = await usersCollection.findOneAndUpdate(
+      { email },
+      { $inc: { balance: totalAmount } },
+      { returnDocument: "after" } // updated document return korbe
+    );
+
+    res.status(200).json({
+      message: "User balance updated successfully",
+      updatedUser: updatedUser.value,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error", error });
+  }
 });
 
 
