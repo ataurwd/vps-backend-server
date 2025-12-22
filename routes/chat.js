@@ -1,70 +1,92 @@
 const express = require("express");
-const { MongoClient, ObjectId } = require("mongodb");
-
+const { MongoClient } = require("mongodb");
 const router = express.Router();
+
 const MONGO_URI = process.env.MONGO_URI;
-
-// MongoDB Connection
 const client = new MongoClient(MONGO_URI);
-let chatCollection;
 
-async function connectDB() {
-    try {
-        await client.connect();
-        const db = client.db("mydb");
-        chatCollection = db.collection("chatCollection");
-        console.log("Connected to MongoDB for Chats");
-    } catch (err) {
-        console.error("Failed to connect to MongoDB", err);
-    }
-}
-connectDB();
+async function run() {
+  try {
+    await client.connect();
+    const db = client.db("mydb");
+    const chatCollection = db.collection("chatCollection");
 
-// 1. POST: Message Pathano (Save Chat)
-router.post("/send", async (req, res) => {
-    try {
-        const { senderId, receiverId, message } = req.body;
+    console.log("Connected to MongoDB for Chats");
 
-        if (!senderId || !receiverId || !message) {
-            return res.status(400).json({ error: "All fields are required" });
+    // ---------------------------------------------------------
+    // 1. POST: Send Message (Save with Order ID)
+    // ---------------------------------------------------------
+    router.post("/send", async (req, res) => {
+      try {
+        const { senderId, receiverId, message, orderId } = req.body;
+
+        // Validation: orderId is now mandatory
+        if (!senderId || !receiverId || !message || !orderId) {
+          return res.status(400).json({ 
+            error: "All fields including 'orderId' are required" 
+          });
         }
 
         const newMessage = {
-            senderId,
-            receiverId,
-            message,
-            timestamp: new Date(),
+          senderId,
+          receiverId,
+          message,
+          orderId, // This separates the chat rooms per product
+          timestamp: new Date(),
         };
 
         const result = await chatCollection.insertOne(newMessage);
         res.status(201).json({ success: true, data: result });
-    } catch (error) {
+      } catch (error) {
+        console.error("Send Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
-    }
-});
+      }
+    });
 
-// 2. GET: Private Chat History (Specific duijon-er moddhe)
-router.get("/history/:user1/:user2", async (req, res) => {
-    try {
+    // ---------------------------------------------------------
+    // 2. GET: Chat History (Filtered by User AND Order ID)
+    // ---------------------------------------------------------
+    router.get("/history/:user1/:user2", async (req, res) => {
+      try {
         const { user1, user2 } = req.params;
+        const { orderId } = req.query; // Frontend must send ?orderId=...
 
-        // Query: User1 sender hole User2 receiver, athoba User2 sender hole User1 receiver
+        if (!orderId) {
+          return res.status(400).json({ 
+            error: "Order ID is required to fetch specific chat history" 
+          });
+        }
+
+        // Logic: (User1 <-> User2) AND (Specific Order ID)
         const query = {
-            $or: [
+          $and: [
+            {
+              $or: [
                 { senderId: user1, receiverId: user2 },
-                { senderId: user2, receiverId: user1 }
-            ]
+                { senderId: user2, receiverId: user1 },
+              ],
+            },
+            { orderId: orderId } // This ensures messages don't mix up
+          ],
         };
 
         const chats = await chatCollection
-            .find(query)
-            .sort({ timestamp: 1 }) // Somoy onujayi sajano
-            .toArray();
+          .find(query)
+          .sort({ timestamp: 1 }) // Oldest first
+          .toArray();
 
         res.status(200).json(chats);
-    } catch (error) {
+      } catch (error) {
+        console.error("History Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
-    }
-});
+      }
+    });
+
+  } catch (error) {
+    console.error("Database connection error:", error);
+  }
+}
+
+run();
 
 module.exports = router;
