@@ -23,7 +23,9 @@ let cartCollection; // We'll assign this after successful connection
         console.log("Connected to MongoDB successfully!");
 
         const db = client.db("mydb");
-        cartCollection = db.collection("withdraw"); // Fixed typo: "withdraw" not "cartCollectoin"
+        cartCollection = db.collection("withdraw"); 
+        userCollection = db.collection("userCollection");
+        withdrawalCollection = db.collection("withdraw");
     } catch (error) {
         console.error("Failed to connect to MongoDB:", error);
         process.exit(1); // Exit if connection fails
@@ -33,33 +35,102 @@ let cartCollection; // We'll assign this after successful connection
 // POST: Create a new withdrawal request
 // Endpoint: POST /withdraw/post
 router.post("/post", async (req, res) => {
-    try {
-        if (!cartCollection) {
-            return res.status(503).send({ message: "Database not ready yet." });
-        }
+  try {
+    const {
+      userId,
+      paymentMethod,     // "kora" | "flutterwave"
+      amount,
+      currency = "NGN",
+      accountNumber,
+      bankCode,
+      fullName,
+      phoneNumber,
+      email,
+      note
+    } = req.body;
 
-        const data = req.body;
-
-        // Basic validation (optional: add more as needed)
-        if (!data.userId || !data.amount) {
-            return res.status(400).send({ message: "userId and amount are required." });
-        }
-
-        const result = await cartCollection.insertOne({
-            ...data,
-            status: "pending",        // Default status
-            createdAt: new Date(),
-        });
-
-        res.status(201).send({
-            success: true,
-            insertedId: result.insertedId,
-            message: "Withdrawal request submitted successfully.",
-        });
-    } catch (error) {
-        console.error("Insert Error:", error);
-        res.status(500).send({ message: "Failed to submit withdrawal request." });
+    // Validation
+    if (!userId || !amount || !paymentMethod || !accountNumber || !bankCode || !fullName) {
+      return res.status(400).json({
+        message: "Missing required fields: userId, amount, paymentMethod, accountNumber, bankCode, fullName"
+      });
     }
+
+    const withdrawAmount = Number(amount);
+    if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
+      return res.status(400).json({ message: "Amount must be a positive number" });
+    }
+
+    // Find user
+    const userObjectId = new ObjectId(userId);
+    const user = await userCollection.findOne({ _id: userObjectId });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const currentBalance = Number(user.balance || 0);
+
+    // Check sufficient balance
+    if (currentBalance < withdrawAmount) {
+      return res.status(400).json({
+        message: "Insufficient balance",
+        available: currentBalance,
+        requested: withdrawAmount
+      });
+    }
+
+    // Use transaction for safety (balance deduct + request create)
+    const session = client.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // 1. Deduct amount from user's balance
+        const updateResult = await userCollection.updateOne(
+          { _id: userObjectId },
+          { $inc: { balance: -withdrawAmount } },
+          { session }
+        );
+
+        if (updateResult.modifiedCount === 0) {
+          throw new Error("Failed to update user balance");
+        }
+
+        // 2. Create withdrawal request
+        const insertResult = await withdrawalCollection.insertOne({
+          userId: userObjectId,
+          userEmail: user.email,
+          paymentMethod,
+          amount: withdrawAmount.toString(), // frontend string চায়
+          currency,
+          accountNumber,
+          bankCode,
+          fullName,
+          phoneNumber: phoneNumber || null,
+          email: email || user.email,
+          note: note || "",
+          status: "pending",
+          adminNote: "",
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }, { session });
+
+        // Success response
+        res.status(201).json({
+          success: true,
+          message: "Withdrawal request submitted successfully. Amount deducted from balance.",
+          withdrawalId: insertResult.insertedId.toString(),
+          deductedAmount: withdrawAmount,
+          newBalance: currentBalance - withdrawAmount
+        });
+      });
+    } finally {
+      await session.endSession();
+    }
+
+  } catch (error) {
+    console.error("Withdrawal submission error:", error);
+    res.status(500).json({ message: "Server error. Please try again later." });
+  }
 });
 
 // PUT: Approve a withdrawal by ID
