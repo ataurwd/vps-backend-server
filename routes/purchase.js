@@ -275,4 +275,69 @@ router.patch("/update-status/:id", async (req, res) => {
   }
 });
 
+
+// to post a single purseches data and set athe data get userEmail and buyerEmail same
+// api endpoint: /purchase/single-purchase
+router.post("/single-purchase", async (req, res) => {
+  try {
+    const { 
+      buyerEmail,     // Buyer-এর email (frontend থেকে আসবে)
+      productName,    // Product-এর নাম
+      price,          // Product-এর দাম (amount)
+      sellerEmail,    // Seller-এর email
+      productId       // Product-এর _id (optional, কিন্তু রাখা ভালো)
+    } = req.body;
+
+    // Validation
+    if (!buyerEmail || !sellerEmail || !price || price <= 0 || !productName) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    // Step 1: Buyer-এর balance check করে deduct করা (atomic)
+    const buyerUpdate = await userCollection.updateOne(
+      { email: buyerEmail, balance: { $gte: price } },
+      { $inc: { balance: -price } }
+    );
+
+    if (buyerUpdate.matchedCount === 0) {
+      return res.status(400).json({ success: false, message: "Insufficient balance or buyer not found" });
+    }
+
+    if (buyerUpdate.modifiedCount === 0) {
+      return res.status(500).json({ success: false, message: "Failed to deduct balance" });
+    }
+
+    // Step 2: Purchase record insert করা (আপনার দেওয়া exact structure অনুযায়ী)
+    const purchaseData = {
+      buyerEmail,
+      productName,
+      price,
+      sellerEmail,
+      productId: productId ? ObjectId(productId) : null,
+      purchaseDate: new Date(),
+      status: "pending"  // প্রথমে pending রাখা হলো, পরে success করতে পারবেন
+    };
+
+    const result = await purchaseCollection.insertOne(purchaseData);
+
+    // Optional: Seller-এর balance-এ টাকা যোগ করা (যদি instant payout চান)
+    await userCollection.updateOne(
+      { email: sellerEmail },
+      { $inc: { balance: price } }
+    );
+
+    // Success response
+    res.status(200).json({
+      success: true,
+      message: "Purchase recorded successfully",
+      purchaseId: result.insertedId,
+      newBuyerBalance: (await userCollection.findOne({ email: buyerEmail })).balance
+    });
+
+  } catch (error) {
+    console.error("Purchase error:", error);
+    res.status(500).json({ success: false, message: "Server error during purchase" });
+  }
+});
+
 module.exports = router;
