@@ -305,4 +305,64 @@ router.patch("/update-status/:id", async (req, res) => {
   }
 });
 
+// =======================================================
+// GET /purchase/getall (Updated for Buyer & Seller)
+// =======================================================
+router.get("/getall", async (req, res) => {
+  const { email, role } = req.query; // role='seller' or 'buyer'
+
+  try {
+    let query = {};
+
+    if (email) {
+      if (role === "seller") {
+        query = { sellerEmail: email }; // সেলার তার নিজের সেল করা অর্ডার দেখবে
+      } else {
+        query = { buyerEmail: email }; // বায়ার তার কেনা অর্ডার দেখবে (Default)
+      }
+    }
+
+    const purchases = await purchaseCollection
+      .find(query)
+      .sort({ purchaseDate: -1 })
+      .toArray();
+
+    res.status(200).json(purchases);
+  } catch (error) {
+    console.error("❌ Fetch purchases error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch purchases" });
+  }
+});
+
+// =======================================================
+// GET /purchase/getall (Updated for Buyer & Seller)
+// =======================================================
+router.get("/getall", async (req, res) => {
+  const { email, role } = req.query; // role='seller' or 'buyer'
+
+  try {
+    let query = {};
+
+    if (email) {
+      if (role === "seller") {
+        // ✅ যদি রোল 'seller' হয়, তবে sellerEmail দিয়ে খুঁজবে (অর্থাৎ তার সেল করা পণ্য)
+        query = { sellerEmail: email }; 
+      } else {
+        // ✅ ডিফল্ট বা 'buyer' হলে buyerEmail দিয়ে খুঁজবে (অর্থাৎ তার কেনা পণ্য)
+        query = { buyerEmail: email }; 
+      }
+    }
+
+    const purchases = await purchaseCollection
+      .find(query)
+      .sort({ purchaseDate: -1 })
+      .toArray();
+
+    res.status(200).json(purchases);
+  } catch (error) {
+    console.error("❌ Fetch purchases error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch purchases" });
+  }
+});
+
 module.exports = router;
