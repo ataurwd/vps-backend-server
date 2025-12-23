@@ -266,5 +266,43 @@ router.get("/getall", async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to fetch purchases" });
   }
 });
+// =======================================================
+// PATCH /purchase/update-status/:id → Confirm/Reject Order
+// =======================================================
+router.patch("/update-status/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    // ১. আইডি ভ্যালিড কিনা চেক করা
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid purchase ID" });
+    }
+
+    // ২. স্ট্যাটাস পাঠানো হয়েছে কিনা চেক করা
+    if (!status) {
+      return res.status(400).json({ success: false, message: "Status is required" });
+    }
+
+    // ৩. ডাটাবেসে আপডেট করা
+    const result = await purchaseCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status: status } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: "Purchase not found" });
+    }
+
+    res.json({
+      success: true,
+      message: `Order status updated to ${status}`,
+    });
+
+  } catch (err) {
+    console.error("❌ Update status error:", err);
+    res.status(500).json({ success: false, message: err.message || "Server Error" });
+  }
+});
 
 module.exports = router;
