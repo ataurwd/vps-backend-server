@@ -107,7 +107,7 @@ const router = express.Router();
 const MONGO_URI = process.env.MONGO_URI;
 
 // ===============================
-// Mongo Client (single instance)
+// Mongo Client Setup
 // ===============================
 const client = new MongoClient(MONGO_URI);
 
@@ -117,14 +117,14 @@ let purchaseCollection;
 let userCollection;
 
 // ===============================
-// DB Connect (run once)
+// DB Connect (Run Once)
 // ===============================
 (async () => {
   try {
     await client.connect();
     console.log("✅ MongoDB connected successfully");
 
-    db = client.db("mydb"); // ⚠️ change if db name different
+    db = client.db("mydb"); // ⚠️ আপনার ডাটাবেস নাম চেক করুন
     cartCollection = db.collection("cart");
     purchaseCollection = db.collection("mypurchase");
     userCollection = db.collection("userCollection");
@@ -135,208 +135,135 @@ let userCollection;
 })();
 
 // =======================================================
-// POST /purchase/post  → Checkout & create purchases
+// POST /purchase/post (Cart Checkout)
 // =======================================================
 router.post("/post", async (req, res) => {
   const { email: buyerEmail } = req.body;
 
-  if (!buyerEmail) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Buyer email required" });
-  }
+  if (!buyerEmail) return res.status(400).json({ success: false, message: "Buyer email required" });
 
   try {
-    // 1️⃣ Get cart items
-    const cartItems = await cartCollection
-      .find({ UserEmail: buyerEmail })
-      .toArray();
+    const cartItems = await cartCollection.find({ UserEmail: buyerEmail }).toArray();
+    if (!cartItems.length) return res.status(400).json({ success: false, message: "Cart is empty" });
 
-    if (!cartItems.length) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Cart is empty" });
-    }
-
-    // 2️⃣ Calculate total price
-    const totalPrice = cartItems.reduce(
-      (sum, item) => sum + Number(item.price || 0),
-      0
-    );
-
-    // 3️⃣ Check buyer balance
+    const totalPrice = cartItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
     const buyer = await userCollection.findOne({ email: buyerEmail });
 
     if (!buyer || Number(buyer.balance || 0) < totalPrice) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance",
-        required: totalPrice,
-        available: buyer?.balance || 0,
-      });
+      return res.status(400).json({ success: false, message: "Insufficient balance", required: totalPrice, available: buyer?.balance || 0 });
     }
 
-    // 4️⃣ Deduct balance
-    await userCollection.updateOne(
-      { email: buyerEmail },
-      { $inc: { balance: -totalPrice } }
-    );
+    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -totalPrice } });
 
-    // 5️⃣ Insert purchases
     const purchaseDocs = cartItems.map((item) => ({
       buyerEmail,
       productName: item.name,
       price: Number(item.price),
       sellerEmail: item.sellerEmail,
-      productId: item._id ? new ObjectId(item._id) : null,
+      productId: item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null),
       purchaseDate: new Date(),
       status: "pending",
     }));
 
     await purchaseCollection.insertMany(purchaseDocs);
-
-    // 6️⃣ Clear cart
     await cartCollection.deleteMany({ UserEmail: buyerEmail });
 
-    res.json({
-      success: true,
-      message: "Purchase successful!",
-      totalDeducted: totalPrice,
-      newBalance: Number(buyer.balance) - totalPrice,
-      itemsPurchased: cartItems.length,
-    });
+    res.json({ success: true, message: "Purchase successful!", totalDeducted: totalPrice, newBalance: Number(buyer.balance) - totalPrice });
   } catch (err) {
-    console.error("❌ Purchase error:", err);
+    console.error("❌ Cart Purchase error:", err);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
 // =======================================================
-// GET /purchase/getall → get purchases (optional email)
+// POST /purchase/single-purchase (Direct Buy - FIXED)
 // =======================================================
-router.get("/getall", async (req, res) => {
-  const { email } = req.query;
-
-  try {
-    const query = email ? { buyerEmail: email } : {};
-
-    const purchases = await purchaseCollection
-      .find(query)
-      .sort({ purchaseDate: -1 })
-      .toArray();
-
-    res.status(200).json(purchases);
-  } catch (error) {
-    console.error("❌ Fetch purchases error:", error);
-    res
-      .status(500)
-      .json({ success: false, message: "Failed to fetch purchases" });
-  }
-});
-
-// =======================================================
-// PATCH /purchase/update-status/:id → Confirm order
-// =======================================================
-router.patch("/update-status/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    if (!ObjectId.isValid(id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid purchase ID" });
-    }
-
-    if (!status) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Status is required" });
-    }
-
-    const result = await purchaseCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status } }
-    );
-
-    if (result.matchedCount === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Purchase not found" });
-    }
-
-    res.json({
-      success: true,
-      message: "Purchase status updated successfully",
-    });
-  } catch (err) {
-    console.error("❌ Update status error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-
-// to post a single purseches data and set athe data get userEmail and buyerEmail same
-// api endpoint: /purchase/single-purchase
 router.post("/single-purchase", async (req, res) => {
   try {
+    console.log("🔹 Single Purchase Request:", req.body); // ডিবাগিং এর জন্য
+
     const { 
-      buyerEmail,     // Buyer-এর email (frontend থেকে আসবে)
-      productName,    // Product-এর নাম
-      price,          // Product-এর দাম (amount)
-      sellerEmail,    // Seller-এর email
-      productId       // Product-এর _id (optional, কিন্তু রাখা ভালো)
+      buyerEmail,    
+      productName,    
+      price,          
+      sellerEmail,    
+      productId       
     } = req.body;
 
-    // Validation
-    if (!buyerEmail || !sellerEmail || !price || price <= 0 || !productName) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+    // ১. ভ্যালিডেশন
+    if (!buyerEmail) return res.status(400).json({ success: false, message: "Buyer email is missing" });
+    if (!productName) return res.status(400).json({ success: false, message: "Product name is missing" });
+    if (!price) return res.status(400).json({ success: false, message: "Price is missing" });
+    
+    // সেলার ইমেইল না থাকলে ডিফল্ট একটা সেট করা (এরর এড়াতে)
+    const finalSellerEmail = sellerEmail || "admin@example.com"; 
+
+    const amount = Number(price);
+
+    // ২. ব্যালেন্স চেক
+    const buyer = await userCollection.findOne({ email: buyerEmail });
+    if (!buyer) return res.status(404).json({ success: false, message: "Buyer account not found" });
+
+    if ((buyer.balance || 0) < amount) {
+        return res.status(400).json({ success: false, message: "Insufficient balance" });
     }
 
-    // Step 1: Buyer-এর balance check করে deduct করা (atomic)
-    const buyerUpdate = await userCollection.updateOne(
-      { email: buyerEmail, balance: { $gte: price } },
-      { $inc: { balance: -price } }
+    // ৩. টাকা কাটা
+    const updateResult = await userCollection.updateOne(
+      { email: buyerEmail },
+      { $inc: { balance: -amount } }
     );
 
-    if (buyerUpdate.matchedCount === 0) {
-      return res.status(400).json({ success: false, message: "Insufficient balance or buyer not found" });
+    if (updateResult.modifiedCount === 0) {
+        return res.status(500).json({ success: false, message: "Failed to deduct balance" });
     }
 
-    if (buyerUpdate.modifiedCount === 0) {
-      return res.status(500).json({ success: false, message: "Failed to deduct balance" });
-    }
-
-    // Step 2: Purchase record insert করা (আপনার দেওয়া exact structure অনুযায়ী)
+    // ৪. ডাটাবেসে সেভ করা (FIX: new ObjectId ব্যবহার করা হয়েছে)
     const purchaseData = {
       buyerEmail,
       productName,
-      price,
-      sellerEmail,
-      productId: productId ? ObjectId(productId) : null,
+      price: amount,
+      sellerEmail: finalSellerEmail,
+      productId: (productId && ObjectId.isValid(productId)) ? new ObjectId(productId) : null,
       purchaseDate: new Date(),
-      status: "pending"  // প্রথমে pending রাখা হলো, পরে success করতে পারবেন
+      status: "pending" 
     };
 
     const result = await purchaseCollection.insertOne(purchaseData);
 
-    // Optional: Seller-এর balance-এ টাকা যোগ করা (যদি instant payout চান)
+    // ৫. সেলারকে টাকা দেওয়া (Optional)
     await userCollection.updateOne(
-      { email: sellerEmail },
-      { $inc: { balance: price } }
+      { email: finalSellerEmail },
+      { $inc: { balance: amount } }
     );
 
-    // Success response
+    // ৬. সাকসেস রেসপন্স
+    const updatedBuyer = await userCollection.findOne({ email: buyerEmail });
+
     res.status(200).json({
       success: true,
-      message: "Purchase recorded successfully",
+      message: "Purchase successful",
       purchaseId: result.insertedId,
-      newBuyerBalance: (await userCollection.findOne({ email: buyerEmail })).balance
+      newBuyerBalance: updatedBuyer.balance
     });
 
   } catch (error) {
-    console.error("Purchase error:", error);
-    res.status(500).json({ success: false, message: "Server error during purchase" });
+    console.error("❌ Single Purchase Error:", error);
+    res.status(500).json({ success: false, message: error.message || "Internal Server Error" });
+  }
+});
+
+// =======================================================
+// GET /purchase/getall
+// =======================================================
+router.get("/getall", async (req, res) => {
+  const { email } = req.query;
+  try {
+    const query = email ? { buyerEmail: email } : {};
+    const purchases = await purchaseCollection.find(query).sort({ purchaseDate: -1 }).toArray();
+    res.status(200).json(purchases);
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch purchases" });
   }
 });
 
