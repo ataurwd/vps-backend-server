@@ -255,11 +255,7 @@ app.use(
 );
 
 app.use(
-  cors({
-    origin: process.env.CLIENT_URL || true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-    credentials: true,
-  })
+  cors()
 );
 
 // ---------------------------------------

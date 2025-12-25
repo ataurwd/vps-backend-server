@@ -1,13 +1,11 @@
 const express = require("express");
 const { MongoClient, ObjectId } = require("mongodb");
-const cors = require("cors"); // CORS সমস্যার সমাধান করতে
 require("dotenv").config();
 
 const router = express.Router();
 
 // Middleware
 router.use(express.json());
-router.use(cors());
 
 // MongoDB configuration
 const MONGO_URI = process.env.MONGO_URI;
