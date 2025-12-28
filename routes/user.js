@@ -132,7 +132,7 @@ router.post('/getall/:userId', async (req, res) => {
   }
 
   // অপশনাল plan validation
-  if (newPlan && !['basic', 'pro', 'business', 'enterprise'].includes(newPlan)) {
+  if (newPlan && !['basic', 'pro', 'business', 'premium'].includes(newPlan)) {
     return res.status(400).json({ message: 'Invalid subscribed plan' });
   }
 
