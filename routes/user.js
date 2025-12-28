@@ -1,53 +1,156 @@
-const express = require("express");
-const axios = require("axios");
-const { MongoClient } = require("mongodb");
+// const express = require("express");
+// const axios = require("axios");
+// const { MongoClient } = require("mongodb");
 
+// const router = express.Router();
+
+// const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
+// const MONGO_URI = process.env.MONGO_URI;
+
+// // Mongo DB
+// const client = new MongoClient(MONGO_URI);
+// const db = client.db("mydb");
+// const users = db.collection("userCollection");
+
+// (async () => await client.connect())();
+
+
+// router.post("/register", async (req, res) => {
+//     const userData = req.body;
+//     const result = await users.insertOne(userData);
+//     res.send(result);
+// })
+
+// // to get all users data
+// // API: /api/user/getall
+// router.get("/getall", async (req, res) => {
+//     const allUsers = await users.find({}).toArray();
+//     res.send(allUsers);
+// });
+
+
+// router.post("/login", async (req, res) => {
+//   const { email, password } = req.body;
+
+//     const user = await users.findOne({ email });
+
+//     if (!user) {
+//       return res.status(404).json({ success: false, message: "User not found" });
+//     }
+
+//     if (user.password !== password) {
+//       return res.status(400).json({ success: false, message: "Wrong password" });
+//     }
+
+//     res.json({
+//       success: true,
+//       message: "Login successful",
+//       user,
+//     });
+
+// });
+
+
+// module.exports = router;
+
+const express = require("express");
+const { MongoClient, ObjectId } = require("mongodb");
 const router = express.Router();
 
-const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
+// MongoDB Setup (Isolating connection for this route file)
 const MONGO_URI = process.env.MONGO_URI;
-
-// Mongo DB
 const client = new MongoClient(MONGO_URI);
 const db = client.db("mydb");
 const users = db.collection("userCollection");
 
-(async () => await client.connect())();
+// Connect to DB
+async function run() {
+  try {
+    await client.connect();
+    console.log("✅ User Route connected to DB");
+  } catch (error) {
+    console.log("❌ User Route DB Error:", error);
+  }
+}
+run();
 
-
+// --- REGISTER ---
 router.post("/register", async (req, res) => {
+  try {
     const userData = req.body;
+    // Default fields
+    if (!userData.balance) userData.balance = 0;
+    if (!userData.role) userData.role = "buyer";
+    
     const result = await users.insertOne(userData);
     res.send(result);
-})
-
-// to get all users data
-// API: /api/user/getall
-router.get("/getall", async (req, res) => {
-    const allUsers = await users.find({}).toArray();
-    res.send(allUsers);
+  } catch (e) {
+    res.status(500).json({message: "Error registering user"});
+  }
 });
 
+// --- GET ALL ---
+router.get("/getall", async (req, res) => {
+  const allUsers = await users.find({}).toArray();
+  res.send(allUsers);
+});
 
+// --- LOGIN ---
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
+  const user = await users.findOne({ email });
+  if (!user) return res.status(404).json({ success: false, message: "User not found" });
+  if (user.password !== password) return res.status(400).json({ success: false, message: "Wrong password" });
+  
+  res.json({ success: true, message: "Login successful", user });
+});
 
-    const user = await users.findOne({ email });
+// --- 🔥 BECOME SELLER ROUTE (FIXED) ---
+router.post('/become-seller', async (req, res) => {
+    console.log("🔔 Hit received at /become-seller"); // টার্মিনালে চেক করুন এই লগ আসে কিনা
 
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
+    try {
+        const { email, amount } = req.body;
+        
+        // ১. ইউজার খোঁজা
+        const user = await users.findOne({ email: email });
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // ২. ব্যালেন্স চেক
+        const currentBalance = Number(user.balance) || 0;
+        const fee = Number(amount);
+
+        if (currentBalance < fee) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "Insufficient balance",
+                available: currentBalance 
+            });
+        }
+
+        // ৩. রোল আপডেট করা (UpdateOne)
+        const newBalance = currentBalance - fee;
+        const result = await users.updateOne(
+            { email: email },
+            { $set: { balance: newBalance, role: "seller" } }
+        );
+
+        if (result.modifiedCount > 0) {
+            res.status(200).json({
+                success: true,
+                message: "Upgraded to Seller",
+                newBalance: newBalance
+            });
+        } else {
+            res.status(400).json({ success: false, message: "Update failed or already seller" });
+        }
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: "Server Error" });
     }
-
-    if (user.password !== password) {
-      return res.status(400).json({ success: false, message: "Wrong password" });
-    }
-
-    res.json({
-      success: true,
-      message: "Login successful",
-      user,
-    });
-
 });
 
 module.exports = router;
