@@ -12,6 +12,7 @@ const MONGO_URI = process.env.MONGO_URI;
 const client = new MongoClient(MONGO_URI);
 const db = client.db("mydb");
 const productCollection = db.collection("products");
+const userCollection = db.collection("userCollection");
 
 
 (async () => {
@@ -25,16 +26,69 @@ const productCollection = db.collection("products");
 
 
 router.post("/sell", async (req, res) => {
-    try {
-        const data = req.body;
-        
-        if (!data.status) data.status = "pending"; 
-        
-        const result = await productCollection.insertOne(data);
-        res.status(201).send(result);
-    } catch (error) {
-        res.status(500).send({ message: "Error inserting product" });
+  try {
+    const data = req.body;
+
+    // Required fields validation (optional but recommended)
+    const requiredFields = [
+      "category",
+      "name",
+      "description",
+      "price",
+      "username",
+      "accountPass",
+      "userEmail",
+    ];
+
+    for (const field of requiredFields) {
+      if (!data[field]) {
+        return res.status(400).json({ message: `${field} is required` });
+      }
     }
+
+    // Default status
+    if (!data.status) data.status = "pending";
+
+    // Find the user by email
+    const user = await userCollection.findOne({ email: data.userEmail });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check salesCredit
+    if (!user.salesCredit || user.salesCredit <= 0) {
+      return res
+        .status(403)
+        .json({ message: "Insufficient listing credits. Please purchase more credits to list an account." });
+    }
+
+    // Deduct 1 credit (using update + insert in transaction is better, but simple way here)
+    const updateUser = await userCollection.updateOne(
+      { email: data.userEmail },
+      { $inc: { salesCredit: -1 } }
+    );
+
+    if (updateUser.modifiedCount === 0) {
+      return res.status(500).json({ message: "Failed to update user credits" });
+    }
+
+    // Insert the product
+    const result = await productCollection.insertOne({
+      ...data,
+      createdAt: new Date(),
+    });
+
+    // Success response
+    res.status(201).json({
+      acknowledged: true,
+      insertedId: result.insertedId,
+      message: "Product listed successfully. 1 listing credit deducted.",
+    });
+  } catch (error) {
+    console.error("Error in /sell route:", error);
+    res.status(500).json({ message: "Server error while listing product" });
+  }
 });
 
 
@@ -96,6 +150,32 @@ router.delete("/delete/:id", async (req, res) => {
     } catch (error) {
         res.status(500).send({ message: "Server error" });
     }
+});
+
+
+// GET /product/credit - Fetch user's salesCredit
+router.get("/credit", async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      return res.status(400).json({ message: "Email query parameter is required" });
+    }
+
+    const user = await userCollection.findOne(
+      { email: email },
+      { projection: { salesCredit: 1, _id: 0 } }
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({ salesCredit: user.salesCredit || 0 });
+  } catch (error) {
+    console.error("Error fetching user credit:", error);
+    res.status(500).json({ message: "Failed to fetch credits" });
+  }
 });
 
 
