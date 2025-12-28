@@ -1,6 +1,6 @@
 const express = require("express");
 const axios = require("axios");
-const { MongoClient } = require("mongodb");
+const { MongoClient, ObjectId } = require("mongodb");
 
 const router = express.Router();
 
@@ -53,30 +53,10 @@ router.post("/login", async (req, res) => {
 
 // Get user by ID
 // get user by id
-router.get("/getall/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    // validate ObjectId
-    if (!ObjectId.isValid(userId)) {
-      return res.status(400).json({ message: "Invalid user id" });
-    }
-
-    const user = await users.findOne({
-      _id: new ObjectId(userId),
-    });
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    res.status(200).json(user);
-  } catch (error) {
-    console.error("GET USER ERROR:", error);
-    res.status(500).json({
-      message: "Server error",
-    });
-  }
+router.get("/getall/:id", async (req, res) => {
+ const id = new ObjectId(req.params.id);
+        const result = await users.findOne({_id: id});
+        res.send(result)
 });
 
 
@@ -94,7 +74,7 @@ router.post('/getall/:userId', async (req, res) => {
   }
 
   // অপশনাল plan validation
-  if (newPlan && !['basic', 'pro', 'premium', 'enterprise'].includes(newPlan)) {
+  if (newPlan && !['basic', 'pro', 'business', 'enterprise'].includes(newPlan)) {
     return res.status(400).json({ message: 'Invalid subscribed plan' });
   }
 
