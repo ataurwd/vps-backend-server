@@ -25,10 +25,11 @@ let userCollection;
     await client.connect();
     console.log("✅ MongoDB connected successfully");
 
-    db = client.db("mydb"); // ⚠️ আপনার ডাটাবেস নাম চেক করুন
+    db = client.db("mydb"); 
     cartCollection = db.collection("cart");
     purchaseCollection = db.collection("mypurchase");
     userCollection = db.collection("userCollection");
+    productsCollection = db.collection("products");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
@@ -67,9 +68,28 @@ router.post("/post", async (req, res) => {
     }));
 
     await purchaseCollection.insertMany(purchaseDocs);
+
+    const productUpdatePromises = cartItems.map(async (item) => {
+      const productObjectId = item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null);
+      console.log(productObjectId)
+      if (productObjectId) {
+        await productsCollection.updateOne( 
+          { _id: productObjectId },
+          { $set: { status: "ongoing" } }
+        );
+      }
+    });
+
+    await Promise.all(productUpdatePromises);
+
     await cartCollection.deleteMany({ UserEmail: buyerEmail });
 
-    res.json({ success: true, message: "Purchase successful!", totalDeducted: totalPrice, newBalance: Number(buyer.balance) - totalPrice });
+    res.json({ 
+      success: true, 
+      message: "Purchase successful!", 
+      totalDeducted: totalPrice, 
+      newBalance: Number(buyer.balance) - totalPrice 
+    });
   } catch (err) {
     console.error("❌ Cart Purchase error:", err);
     res.status(500).json({ success: false, message: "Server error" });
@@ -77,11 +97,11 @@ router.post("/post", async (req, res) => {
 });
 
 // =======================================================
-// POST /purchase/single-purchase (Direct Buy - FIXED)
+// POST /purchase/single-purchase (Direct Buy - WITH STATUS UPDATE)
 // =======================================================
 router.post("/single-purchase", async (req, res) => {
   try {
-    console.log("🔹 Single Purchase Request:", req.body); // ডিবাগিং এর জন্য
+    console.log("🔹 Single Purchase Request:", req.body);
 
     const { 
       buyerEmail,    
@@ -91,17 +111,13 @@ router.post("/single-purchase", async (req, res) => {
       productId       
     } = req.body;
 
-    // ১. ভ্যালিডেশন
     if (!buyerEmail) return res.status(400).json({ success: false, message: "Buyer email is missing" });
     if (!productName) return res.status(400).json({ success: false, message: "Product name is missing" });
     if (!price) return res.status(400).json({ success: false, message: "Price is missing" });
-    
-    // সেলার ইমেইল না থাকলে ডিফল্ট একটা সেট করা (এরর এড়াতে)
+    if (!productId) return res.status(400).json({ success: false, message: "Product ID is missing" }); // অবশ্যই দরকার
+
     const finalSellerEmail = sellerEmail || "admin@example.com"; 
-
     const amount = Number(price);
-
-    // ২. ব্যালেন্স চেক
     const buyer = await userCollection.findOne({ email: buyerEmail });
     if (!buyer) return res.status(404).json({ success: false, message: "Buyer account not found" });
 
@@ -109,43 +125,55 @@ router.post("/single-purchase", async (req, res) => {
         return res.status(400).json({ success: false, message: "Insufficient balance" });
     }
 
-    // ৩. টাকা কাটা
-    const updateResult = await userCollection.updateOne(
+    const productObjectId = new ObjectId(productId);
+    const product = await productsCollection.findOne({ _id: productObjectId });
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    if (product.status !== "active") {
+      return res.status(400).json({ success: false, message: "Product is not available for purchase" });
+    }
+
+    const deductResult = await userCollection.updateOne(
       { email: buyerEmail },
       { $inc: { balance: -amount } }
     );
 
-    if (updateResult.modifiedCount === 0) {
+    if (deductResult.modifiedCount === 0) {
         return res.status(500).json({ success: false, message: "Failed to deduct balance" });
     }
 
-    // ৪. ডাটাবেসে সেভ করা (FIX: new ObjectId ব্যবহার করা হয়েছে)
     const purchaseData = {
       buyerEmail,
       productName,
       price: amount,
       sellerEmail: finalSellerEmail,
-      productId: (productId && ObjectId.isValid(productId)) ? new ObjectId(productId) : null,
+      productId: productObjectId,
       purchaseDate: new Date(),
       status: "pending" 
     };
 
     const result = await purchaseCollection.insertOne(purchaseData);
 
-    // ৫. সেলারকে টাকা দেওয়া (Optional)
+    await productsCollection.updateOne(
+      { _id: productObjectId },
+      { $set: { status: "ongoing" } }
+    );
+
     await userCollection.updateOne(
       { email: finalSellerEmail },
       { $inc: { balance: amount } }
     );
 
-    // ৬. সাকসেস রেসপন্স
     const updatedBuyer = await userCollection.findOne({ email: buyerEmail });
 
     res.status(200).json({
       success: true,
       message: "Purchase successful",
       purchaseId: result.insertedId,
-      newBuyerBalance: updatedBuyer.balance
+      newBuyerBalance: updatedBuyer?.balance || 0
     });
 
   } catch (error) {
