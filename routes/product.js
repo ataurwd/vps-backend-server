@@ -38,6 +38,7 @@ router.post("/sell", async (req, res) => {
       "username",
       "accountPass",
       "userEmail",
+      "userAccountName",
     ];
 
     for (const field of requiredFields) {
