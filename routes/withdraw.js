@@ -20,7 +20,6 @@ let cartCollection; // We'll assign this after successful connection
 (async () => {
     try {
         await client.connect();
-        console.log("Connected to MongoDB successfully!");
 
         const db = client.db("mydb");
         cartCollection = db.collection("withdraw"); 

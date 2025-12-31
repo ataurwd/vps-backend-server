@@ -32,7 +32,6 @@ router.post("/create-payment", async (req, res) => {
       paymentLink: response.data.data.link,
     });
   } catch (error) {
-    console.log(error.response.data);
     return res.status(500).json({ error: "Payment create failed" });
   }
 });

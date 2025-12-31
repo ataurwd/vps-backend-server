@@ -13,9 +13,7 @@ const users = db.collection("userCollection");
 async function run() {
   try {
     await client.connect();
-    console.log("✅ User Route connected to DB");
   } catch (error) {
-    console.log("❌ User Route DB Error:", error);
   }
 }
 run();
@@ -62,7 +60,6 @@ router.post("/login", async (req, res) => {
 
 // --- 🔥 BECOME SELLER ROUTE (FIXED) ---
 router.post('/become-seller', async (req, res) => {
-    console.log("🔔 Hit received at /become-seller"); // টার্মিনালে চেক করুন এই লগ আসে কিনা
 
     try {
         const { email, amount } = req.body;

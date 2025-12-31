@@ -23,8 +23,6 @@ let userCollection;
 (async () => {
   try {
     await client.connect();
-    console.log("✅ MongoDB connected successfully");
-
     db = client.db("mydb"); 
     cartCollection = db.collection("cart");
     purchaseCollection = db.collection("mypurchase");
@@ -71,7 +69,6 @@ router.post("/post", async (req, res) => {
 
     const productUpdatePromises = cartItems.map(async (item) => {
       const productObjectId = item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null);
-      console.log(productObjectId)
       if (productObjectId) {
         await productsCollection.updateOne( 
           { _id: productObjectId },
@@ -100,7 +97,6 @@ router.post("/post", async (req, res) => {
 // =======================================================
 router.post("/single-purchase", async (req, res) => {
   try {
-    console.log("🔹 Single Purchase Request:", req.body);
 
     const { 
       buyerEmail,    

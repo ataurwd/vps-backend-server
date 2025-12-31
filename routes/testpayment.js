@@ -22,7 +22,6 @@ let paymentsCollection;
     await client.connect();
     db = client.db("mydb");
     paymentsCollection = db.collection("payments");
-    console.log("Connected to MongoDB");
   } catch (err) {
     console.error("Failed to connect to MongoDB", err);
     process.exit(1);
@@ -33,7 +32,6 @@ let paymentsCollection;
 process.on("SIGINT", async () => {
   if (client) {
     await client.close();
-    console.log("MongoDB connection closed");
   }
   process.exit(0);
 });
@@ -96,7 +94,6 @@ app.post("/verify-payment", async (req, res) => {
     };
 
     await paymentsCollection.insertOne(paymentData);
-    console.log(`Payment saved for user: ${userEmail} | Amount: ${currency}${amount}`);
 
     res.json({
       message: "Payment successfully verified and saved",
@@ -113,19 +110,6 @@ app.post("/verify-payment", async (req, res) => {
 app.post("/webhook/flutterwave", express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }), async (req, res) => {
   // Simple verif-hash verification (most common and recommended by Flutterwave docs)
   const signature = req.headers["verif-hash"];
-  // if (!signature || signature !== FLW_WEBHOOK_HASH) {
-  //   return res.status(401).send("Invalid signature");
-  // }
-
-  // Alternative HMAC verification (older or custom setup - remove if not needed)
-  // const hash = crypto.createHmac("sha256", FLW_SECRET_KEY).update(req.rawBody).digest("hex");
-  // if (hash !== signature) {
-  //   return res.status(401).send("Invalid signature");
-  // }
-
-  console.log("Webhook received:", req.body);
-
-  // TODO: Process the event here (e.g., charge.success -> verify & credit balance if not already done)
 
   res.status(200).send("OK");
 });
