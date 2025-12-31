@@ -14,7 +14,6 @@ const cartCollectoin = db.collection("cart");
 (async () => {
     try {
         await client.connect();
-        console.log("Connected to MongoDB for Cart");
     } catch (err) {
         console.error("DB Connection Error:", err);
     }

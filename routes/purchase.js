@@ -23,9 +23,7 @@ let reportCollection; // ✅ নিউ কালেকশন ভেরিয়ে�
 (async () => {
   try {
     await client.connect();
-    console.log("✅ MongoDB connected successfully");
-
-    db = client.db("mydb");
+    db = client.db("mydb"); 
     cartCollection = db.collection("cart");
     purchaseCollection = db.collection("mypurchase");
     userCollection = db.collection("userCollection");
@@ -151,7 +149,10 @@ router.post("/post", async (req, res) => {
 // =======================================================
 router.post("/single-purchase", async (req, res) => {
   try {
+
     const { buyerEmail, productName, price, sellerEmail, productId } = req.body;
+
+
 
     if (!buyerEmail || !productName || !price || !productId) {
       return res.status(400).json({ success: false, message: "Required fields are missing" });

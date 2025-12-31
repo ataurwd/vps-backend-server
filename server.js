@@ -44,7 +44,6 @@ async function connectDB() {
     userCollection = db.collection("userCollection");
 
     isConnected = true;
-    console.log("📦 MongoDB Connected Successfully");
   } catch (error) {
     console.error("❌ MongoDB Connection Error:", error);
   }
@@ -207,7 +206,6 @@ app.get("/icon-data", async (req, res) => {
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3200;
   app.listen(PORT, () => {
-    console.log(`🚀 Local server running at http://localhost:${PORT}`);
   });
 }
 
@@ -218,14 +216,12 @@ cron.schedule(
   "0 0 * * *",
   async () => {
     try {
-      console.log("🔄 Daily salesCredit reset running...", new Date());
 
       const result = await userCollection.updateMany(
         {}, // সব ইউজার
         { $set: { salesCredit: 10 } }
       );
 
-      console.log(`✅ Reset complete! Updated ${result.modifiedCount} users.`);
     } catch (error) {
       console.error("❌ Error in daily credit reset:", error);
     }
@@ -235,7 +231,6 @@ cron.schedule(
   }
 );
 
-console.log("⏰ Daily credit reset scheduler started (every midnight BD time)");
 
 
 // ---------------------------------------
