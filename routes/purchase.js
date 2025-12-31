@@ -1,5 +1,3 @@
-
-
 const express = require("express");
 const { MongoClient, ObjectId } = require("mongodb");
 
@@ -16,6 +14,8 @@ let db;
 let cartCollection;
 let purchaseCollection;
 let userCollection;
+let productsCollection;
+let reportCollection; // ✅ নিউ কালেকশন ভেরিয়েবল
 
 // ===============================
 // DB Connect (Run Once)
@@ -25,16 +25,68 @@ let userCollection;
     await client.connect();
     console.log("✅ MongoDB connected successfully");
 
-    db = client.db("mydb"); 
+    db = client.db("mydb");
     cartCollection = db.collection("cart");
     purchaseCollection = db.collection("mypurchase");
     userCollection = db.collection("userCollection");
     productsCollection = db.collection("products");
+    reportCollection = db.collection("reports"); // ✅ রিপোর্ট কালেকশন কানেক্ট করা হলো
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
     process.exit(1);
   }
 })();
+
+// =======================================================
+// 🚀 NEW: POST /purchase/report/create (রিপোর্ট জমা দেওয়া)
+// =======================================================
+router.post("/report/create", async (req, res) => {
+  try {
+    const { orderId, reporterEmail, sellerEmail, reason, message } = req.body;
+
+    // ভ্যালিডেশন
+    if (!orderId || !reporterEmail || !sellerEmail || !reason || !message) {
+      return res.status(400).json({ success: false, message: "All fields are required" });
+    }
+
+    const newReport = {
+      orderId,
+      reporterEmail,
+      sellerEmail,
+      reason,
+      message,
+      status: "Pending", // ডিফল্ট স্ট্যাটাস
+      createdAt: new Date(),
+    };
+
+    const result = await reportCollection.insertOne(newReport);
+
+    res.status(201).json({
+      success: true,
+      message: "Report submitted successfully",
+      reportId: result.insertedId,
+    });
+  } catch (error) {
+    console.error("❌ Report Create Error:", error);
+    res.status(500).json({ success: false, message: "Server error, failed to submit report" });
+  }
+});
+
+// =======================================================
+// 🚀 NEW: GET /purchase/report/getall (সব রিপোর্ট দেখা - Admin এর জন্য)
+// =======================================================
+router.get("/report/getall", async (req, res) => {
+  try {
+    const reports = await reportCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.status(200).json(reports);
+  } catch (error) {
+    console.error("❌ Fetch Reports Error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch reports" });
+  }
+});
 
 // =======================================================
 // POST /purchase/post (Cart Checkout)
@@ -71,9 +123,8 @@ router.post("/post", async (req, res) => {
 
     const productUpdatePromises = cartItems.map(async (item) => {
       const productObjectId = item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null);
-      console.log(productObjectId)
       if (productObjectId) {
-        await productsCollection.updateOne( 
+        await productsCollection.updateOne(
           { _id: productObjectId },
           { $set: { status: "ongoing" } }
         );
@@ -81,14 +132,13 @@ router.post("/post", async (req, res) => {
     });
 
     await Promise.all(productUpdatePromises);
-
     await cartCollection.deleteMany({ UserEmail: buyerEmail });
 
-    res.json({ 
-      success: true, 
-      message: "Purchase successful!", 
-      totalDeducted: totalPrice, 
-      newBalance: Number(buyer.balance) - totalPrice 
+    res.json({
+      success: true,
+      message: "Purchase successful!",
+      totalDeducted: totalPrice,
+      newBalance: Number(buyer.balance) - totalPrice
     });
   } catch (err) {
     console.error("❌ Cart Purchase error:", err);
@@ -96,75 +146,46 @@ router.post("/post", async (req, res) => {
   }
 });
 
-// POST /purchase/single-purchase (Direct Buy - WITH STATUS UPDATE)
+// =======================================================
+// POST /purchase/single-purchase (Direct Buy)
 // =======================================================
 router.post("/single-purchase", async (req, res) => {
   try {
-    console.log("🔹 Single Purchase Request:", req.body);
+    const { buyerEmail, productName, price, sellerEmail, productId } = req.body;
 
-    const { 
-      buyerEmail,    
-      productName,    
-      price,          
-      sellerEmail,    
-      productId       
-    } = req.body;
+    if (!buyerEmail || !productName || !price || !productId) {
+      return res.status(400).json({ success: false, message: "Required fields are missing" });
+    }
 
-    if (!buyerEmail) return res.status(400).json({ success: false, message: "Buyer email is missing" });
-    if (!productName) return res.status(400).json({ success: false, message: "Product name is missing" });
-    if (!price) return res.status(400).json({ success: false, message: "Price is missing" });
-    if (!productId) return res.status(400).json({ success: false, message: "Product ID is missing" }); // অবশ্যই দরকার
-
-    const finalSellerEmail = sellerEmail || "admin@example.com"; 
     const amount = Number(price);
     const buyer = await userCollection.findOne({ email: buyerEmail });
-    if (!buyer) return res.status(404).json({ success: false, message: "Buyer account not found" });
 
-    if ((buyer.balance || 0) < amount) {
-        return res.status(400).json({ success: false, message: "Insufficient balance" });
+    if (!buyer || (buyer.balance || 0) < amount) {
+      return res.status(400).json({ success: false, message: "Insufficient balance" });
     }
 
     const productObjectId = new ObjectId(productId);
     const product = await productsCollection.findOne({ _id: productObjectId });
 
-    if (!product) {
-      return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product || product.status !== "active") {
+      return res.status(400).json({ success: false, message: "Product is not available" });
     }
 
-    if (product.status !== "active") {
-      return res.status(400).json({ success: false, message: "Product is not available for purchase" });
-    }
-
-    const deductResult = await userCollection.updateOne(
-      { email: buyerEmail },
-      { $inc: { balance: -amount } }
-    );
-
-    if (deductResult.modifiedCount === 0) {
-        return res.status(500).json({ success: false, message: "Failed to deduct balance" });
-    }
+    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -amount } });
 
     const purchaseData = {
       buyerEmail,
       productName,
       price: amount,
-      sellerEmail: finalSellerEmail,
+      sellerEmail: sellerEmail || "admin@example.com",
       productId: productObjectId,
       purchaseDate: new Date(),
-      status: "pending" 
+      status: "pending"
     };
 
     const result = await purchaseCollection.insertOne(purchaseData);
-
-    await productsCollection.updateOne(
-      { _id: productObjectId },
-      { $set: { status: "ongoing" } }
-    );
-
-    await userCollection.updateOne(
-      { email: finalSellerEmail },
-      { $inc: { balance: amount } }
-    );
+    await productsCollection.updateOne({ _id: productObjectId }, { $set: { status: "ongoing" } });
+    await userCollection.updateOne({ email: sellerEmail }, { $inc: { balance: amount } });
 
     const updatedBuyer = await userCollection.findOne({ email: buyerEmail });
 
@@ -177,23 +198,38 @@ router.post("/single-purchase", async (req, res) => {
 
   } catch (error) {
     console.error("❌ Single Purchase Error:", error);
-    res.status(500).json({ success: false, message: error.message || "Internal Server Error" });
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 });
 
 // =======================================================
-// GET /purchase/getall
+// GET /purchase/getall (Buyer & Seller এর জন্য একটিই ক্লিন রাউট)
 // =======================================================
 router.get("/getall", async (req, res) => {
-  const { email } = req.query;
+  const { email, role } = req.query;
+
   try {
-    const query = email ? { buyerEmail: email } : {};
-    const purchases = await purchaseCollection.find(query).sort({ purchaseDate: -1 }).toArray();
+    let query = {};
+    if (email) {
+      if (role === "seller") {
+        query = { sellerEmail: email };
+      } else {
+        query = { buyerEmail: email };
+      }
+    }
+
+    const purchases = await purchaseCollection
+      .find(query)
+      .sort({ purchaseDate: -1 })
+      .toArray();
+
     res.status(200).json(purchases);
   } catch (error) {
+    console.error("❌ Fetch purchases error:", error);
     res.status(500).json({ success: false, message: "Failed to fetch purchases" });
   }
 });
+
 // =======================================================
 // PATCH /purchase/update-status/:id → Confirm/Reject Order
 // =======================================================
@@ -202,17 +238,10 @@ router.patch("/update-status/:id", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    // ১. আইডি ভ্যালিড কিনা চেক করা
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid purchase ID" });
+    if (!ObjectId.isValid(id) || !status) {
+      return res.status(400).json({ success: false, message: "Invalid ID or Status" });
     }
 
-    // ২. স্ট্যাটাস পাঠানো হয়েছে কিনা চেক করা
-    if (!status) {
-      return res.status(400).json({ success: false, message: "Status is required" });
-    }
-
-    // ৩. ডাটাবেসে আপডেট করা
     const result = await purchaseCollection.updateOne(
       { _id: new ObjectId(id) },
       { $set: { status: status } }
@@ -222,74 +251,11 @@ router.patch("/update-status/:id", async (req, res) => {
       return res.status(404).json({ success: false, message: "Purchase not found" });
     }
 
-    res.json({
-      success: true,
-      message: `Order status updated to ${status}`,
-    });
+    res.json({ success: true, message: `Order status updated to ${status}` });
 
   } catch (err) {
     console.error("❌ Update status error:", err);
-    res.status(500).json({ success: false, message: err.message || "Server Error" });
-  }
-});
-
-// =======================================================
-// GET /purchase/getall (Updated for Buyer & Seller)
-// =======================================================
-router.get("/getall", async (req, res) => {
-  const { email, role } = req.query; // role='seller' or 'buyer'
-
-  try {
-    let query = {};
-
-    if (email) {
-      if (role === "seller") {
-        query = { sellerEmail: email }; // সেলার তার নিজের সেল করা অর্ডার দেখবে
-      } else {
-        query = { buyerEmail: email }; // বায়ার তার কেনা অর্ডার দেখবে (Default)
-      }
-    }
-
-    const purchases = await purchaseCollection
-      .find(query)
-      .sort({ purchaseDate: -1 })
-      .toArray();
-
-    res.status(200).json(purchases);
-  } catch (error) {
-    console.error("❌ Fetch purchases error:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch purchases" });
-  }
-});
-
-// =======================================================
-// GET /purchase/getall (Updated for Buyer & Seller)
-// =======================================================
-router.get("/getall", async (req, res) => {
-  const { email, role } = req.query; // role='seller' or 'buyer'
-
-  try {
-    let query = {};
-
-    if (email) {
-      if (role === "seller") {
-        // ✅ যদি রোল 'seller' হয়, তবে sellerEmail দিয়ে খুঁজবে (অর্থাৎ তার সেল করা পণ্য)
-        query = { sellerEmail: email }; 
-      } else {
-        // ✅ ডিফল্ট বা 'buyer' হলে buyerEmail দিয়ে খুঁজবে (অর্থাৎ তার কেনা পণ্য)
-        query = { buyerEmail: email }; 
-      }
-    }
-
-    const purchases = await purchaseCollection
-      .find(query)
-      .sort({ purchaseDate: -1 })
-      .toArray();
-
-    res.status(200).json(purchases);
-  } catch (error) {
-    console.error("❌ Fetch purchases error:", error);
-    res.status(500).json({ success: false, message: "Failed to fetch purchases" });
+    res.status(500).json({ success: false, message: "Server Error" });
   }
 });
 
