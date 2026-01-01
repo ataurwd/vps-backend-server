@@ -393,5 +393,45 @@ router.patch("/report/update/:id", async (req, res) => {
 
 // ... বাকি সব কোড (post, single-purchase, ইত্যাদি) নিচে থাকবে ...
 
+//////Other purchase routes here...
+// ... আপনার ইমপোর্ট এবং কানেকশন কোড ঠিক আছে ...
+
+// =======================================================
+// 🚀 ১. অটো-ক্যান্সেল রাউট (অর্ডার ১ ঘণ্টা পার হলে ক্যান্সেল হবে)
+// =======================================================
+router.get("/auto-cancel-check", async (req, res) => {
+  try {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+    // ১ ঘণ্টার বেশি পুরনো "pending" অর্ডারগুলো খুঁজুন
+    const expiredOrders = await purchaseCollection.find({
+      status: "pending",
+      purchaseDate: { $lt: oneHourAgo }
+    }).toArray();
+
+    if (expiredOrders.length > 0) {
+      const ids = expiredOrders.map(order => order._id);
+      const productIds = expiredOrders.map(order => order.productId).filter(id => id);
+
+      // অর্ডার স্ট্যাটাস 'cancelled' করা
+      await purchaseCollection.updateMany(
+        { _id: { $in: ids } },
+        { $set: { status: "cancelled", updatedAt: new Date() } }
+      );
+
+      // প্রোডাক্ট আবার 'active' করা যাতে অন্য কেউ কিনতে পারে
+      if (productIds.length > 0) {
+        await productsCollection.updateMany(
+          { _id: { $in: productIds } },
+          { $set: { status: "active" } }
+        );
+      }
+    }
+
+    res.json({ success: true, processed: expiredOrders.length });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 module.exports = router;
