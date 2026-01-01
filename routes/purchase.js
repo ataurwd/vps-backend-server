@@ -343,4 +343,55 @@ router.patch("/update-status/:id", async (req, res) => {
   }
 });
 
+
+// ... আগের সব কোড ঠিক থাকবে ...
+
+// =======================================================
+// 🚀 NEW: GET /purchase/report/getall (সব রিপোর্ট দেখা - Admin এর জন্য)
+// =======================================================
+router.get("/report/getall", async (req, res) => {
+  try {
+    const reports = await reportCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.status(200).json(reports);
+  } catch (error) {
+    console.error("❌ Fetch Reports Error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch reports" });
+  }
+});
+
+// =======================================================
+// 🛠️ FIX: PATCH /purchase/report/update/:id (রিপোর্ট স্ট্যাটাস আপডেট)
+// এই রাউটটি না থাকার কারণেই আপনার ৪০৪ এরর আসছিল
+// =======================================================
+router.patch("/report/update/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid Report ID" });
+    }
+
+    const result = await reportCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status: status, updatedAt: new Date() } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: "Report not found" });
+    }
+
+    res.status(200).json({ success: true, message: "Report status updated successfully" });
+  } catch (error) {
+    console.error("❌ Report Update Error:", error);
+    res.status(500).json({ success: false, message: "Failed to update report status" });
+  }
+});
+
+// ... বাকি সব কোড (post, single-purchase, ইত্যাদি) নিচে থাকবে ...
+
+
 module.exports = router;
