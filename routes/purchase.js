@@ -237,23 +237,106 @@ router.get("/getall", async (req, res) => {
 router.patch("/update-status/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, sellerEmail } = req.body;  // sellerEmail frontend থেকে আসবে
 
     if (!ObjectId.isValid(id) || !status) {
       return res.status(400).json({ success: false, message: "Invalid ID or Status" });
     }
 
-    const result = await purchaseCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status: status } }
-    );
+    if (status !== "completed") {
+      const result = await purchaseCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status } }
+      );
 
-    if (result.matchedCount === 0) {
-      return res.status(404).json({ success: false, message: "Purchase not found" });
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ success: false, message: "Purchase not found" });
+      }
+
+      return res.json({ success: true, message: `Order status updated to ${status}` });
     }
 
-    res.json({ success: true, message: `Order status updated to ${status}` });
+    // Only for "completed" status
+    if (!sellerEmail) {
+      return res.status(400).json({ success: false, message: "Seller email is required for completion" });
+    }
 
+    const session = await purchaseCollection.db.client.startSession();
+
+    let commissionResult;
+    try {
+      await session.withTransaction(async () => {
+        // Find purchase to get amount
+        const purchase = await purchaseCollection.findOne(
+          { _id: new ObjectId(id) },
+          { session }
+        );
+
+        if (!purchase) {
+          throw new Error("Purchase not found");
+        }
+
+        // Adjust these field names according to your actual schema
+        const amount = purchase.amount || purchase.totalPrice || purchase.price || purchase.totalAmount;
+
+        if (typeof amount !== "number" || amount <= 0) {
+          throw new Error("Invalid or missing purchase amount");
+        }
+
+        const sellerCommission = amount * 0.8;
+        const adminCommission = amount * 0.2;
+
+        // Update status
+        await purchaseCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: "completed" } },
+          { session }
+        );
+
+        // Add to seller balance
+        const sellerUpdate = await userCollection.updateOne(
+          { email: sellerEmail },
+          { $inc: { balance: sellerCommission } },
+          { session }
+        );
+
+        if (sellerUpdate.matchedCount === 0) {
+          throw new Error(`Seller not found with email: ${sellerEmail}`);
+        }
+
+        // Add to admin balance
+        const adminUpdate = await userCollection.updateOne(
+          { email: "admin@gmail.com" },
+          { $inc: { balance: adminCommission } },
+          { session }
+        );
+
+        if (adminUpdate.matchedCount === 0) {
+          throw new Error("Admin account not found");
+        }
+
+        commissionResult = {
+          sellerEmail,
+          amount,
+          sellerCommission,
+          adminCommission,
+        };
+      });
+    } catch (transactionError) {
+      console.error("Transaction failed:", transactionError);
+      return res.status(500).json({
+        success: false,
+        message: transactionError.message || "Failed to process commission",
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    res.json({
+      success: true,
+      message: "Order completed and commissions distributed successfully",
+      data: commissionResult,
+    });
   } catch (err) {
     console.error("❌ Update status error:", err);
     res.status(500).json({ success: false, message: "Server Error" });
