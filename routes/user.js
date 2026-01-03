@@ -240,23 +240,26 @@ run();
 router.post("/register", async (req, res) => {
   try {
     const userData = req.body;
-    const referredByCode = userData.referredBy; // ফ্রন্টএন্ড থেকে আসা কোড
+    const referredByCode = userData.referredBy;
 
-    // ১. ডিফল্ট ফিল্ড সেট করা
+    // ১. ইউনিক রেফারাল কোড জেনারেট করা (যদি ফ্রন্টএন্ড থেকে না আসে)
+    if (!userData.referralCode) {
+      userData.referralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+    }
+
+    // ২. ডিফল্ট ফিল্ড সেট করা
     if (!userData.balance) userData.balance = 0;
     if (!userData.role) userData.role = "buyer";
     if (!userData.salesCredit) userData.salesCredit = 10;
 
-    // ২. নতুন ইউজার সেভ করা
+    // ৩. নতুন ইউজার সেভ করা
     const result = await users.insertOne(userData);
 
-    // ৩. রেফারাল বোনাস লজিক (সবচেয়ে গুরুত্বপূর্ণ)
+    // ৪. রেফারাল বোনাস লজিক
     if (referredByCode && result.insertedId) {
-      // ডাটাবেজে এই কোডটি কার আছে তা খোঁজা
       const referrer = await users.findOne({ referralCode: referredByCode });
 
       if (referrer) {
-        // রেফারারের ব্যালেন্স ৫ ডলার বাড়িয়ে দেওয়া
         await users.updateOne(
           { _id: referrer._id },
           { $inc: { balance: 5 } }
@@ -265,14 +268,18 @@ router.post("/register", async (req, res) => {
       }
     }
 
-    res.status(201).send({ insertedId: result.insertedId });
+    // রেসপন্সে insertedId এর সাথে নতুন কোডটিও পাঠিয়ে দেওয়া ভালো
+    res.status(201).send({ 
+      insertedId: result.insertedId, 
+      referralCode: userData.referralCode 
+    });
   } catch (e) {
     console.error("Register Error:", e);
     res.status(500).json({ message: "Error registering user", error: e.message });
   }
 });
 
-// --- LOGIN ---
+// --- LOGIN (বাকি সব আগের মতোই থাকবে) ---
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   const user = await users.findOne({ email });
