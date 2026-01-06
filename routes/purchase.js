@@ -4,17 +4,11 @@ const { MongoClient, ObjectId } = require("mongodb");
 const router = express.Router();
 
 const MONGO_URI = process.env.MONGO_URI;
-
-// ===============================
-// Mongo Client Setup
-// ===============================
 const client = new MongoClient(MONGO_URI);
 
 let db, cartCollection, purchaseCollection, userCollection, productsCollection, reportCollection;
 
-// ===============================
-// DB Connect
-// ===============================
+// MongoDB Connection
 (async () => {
   try {
     await client.connect();
@@ -24,192 +18,171 @@ let db, cartCollection, purchaseCollection, userCollection, productsCollection, 
     userCollection = db.collection("userCollection");
     productsCollection = db.collection("products");
     reportCollection = db.collection("reports");
-    console.log("✅ MongoDB Connected Successfully");
+    console.log("✅ MongoDB Connected for Purchase Routes");
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
-    process.exit(1);
   }
 })();
 
 // =======================================================
-// 🚀 ১. CART PURCHASE (একাধিক আইটেম কিনলে ONGOING হবে)
+// 1. Confirm Order & Commission (PATCH /update-status/:id)
 // =======================================================
-router.post("/post", async (req, res) => {
-  const { email: buyerEmail } = req.body;
-  try {
-    const cartItems = await cartCollection.find({ UserEmail: buyerEmail }).toArray();
-    if (!cartItems.length) return res.status(400).json({ success: false, message: "Cart empty" });
-
-    const totalPrice = cartItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
-    const buyer = await userCollection.findOne({ email: buyerEmail });
-
-    if (!buyer || buyer.balance < totalPrice) return res.status(400).json({ success: false, message: "Insufficient balance" });
-
-    // বায়ারের ব্যালেন্স কমানো
-    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -totalPrice } });
-
-    const purchaseDocs = cartItems.map(item => ({
-      buyerEmail,
-      productName: item.name,
-      price: Number(item.price),
-      sellerEmail: item.sellerEmail,
-      productId: item.productId ? new ObjectId(item.productId) : null,
-      purchaseDate: new Date(),
-      status: "pending",
-    }));
-
-    // ১. পারচেজ রেকর্ড তৈরি
-    await purchaseCollection.insertMany(purchaseDocs);
-
-    // ২. প্রোডাক্টগুলোর স্ট্যাটাস 'ongoing' করা (যাতে অন্য কেউ কিনতে না পারে)
-    const productIds = cartItems.map(item => item.productId ? new ObjectId(item.productId) : null).filter(id => id);
-    if (productIds.length > 0) {
-      await productsCollection.updateMany(
-        { _id: { $in: productIds } },
-        { $set: { status: "ongoing" } }
-      );
-    }
-
-    // ৩. কার্ট পরিষ্কার করা
-    await cartCollection.deleteMany({ UserEmail: buyerEmail });
-
-    res.json({ success: true, message: "Purchase successful and products are now ongoing!" });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
-// =======================================================
-// 🚀 ২. SINGLE PURCHASE (সরাসরি কিনলে ONGOING হবে)
-// =======================================================
-router.post("/single-purchase", async (req, res) => {
-  try {
-    const { buyerEmail, productName, price, sellerEmail, productId } = req.body;
-    const amount = Number(price);
-    const buyer = await userCollection.findOne({ email: buyerEmail });
-
-    if (!buyer || buyer.balance < amount) return res.status(400).json({ success: false, message: "Insufficient balance" });
-
-    const productObjectId = new ObjectId(productId);
-
-    // ১. বায়ারের ব্যালেন্স কমানো
-    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -amount } });
-
-    // ২. পারচেজ রেকর্ড তৈরি
-    await purchaseCollection.insertOne({
-      buyerEmail,
-      productName,
-      price: amount,
-      sellerEmail,
-      productId: productObjectId,
-      purchaseDate: new Date(),
-      status: "pending"
-    });
-
-    // ৩. প্রোডাক্টের স্ট্যাটাস 'ongoing' করা
-    await productsCollection.updateOne(
-      { _id: productObjectId },
-      { $set: { status: "ongoing" } }
-    );
-
-    res.json({ success: true, message: "Purchase successful, product is now ongoing!" });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
-// =======================================================
-// 🚀 ৩. MARK AS SOLD (রিপোর্ট থেকে সোল্ড করলে প্রোডাক্ট সোল্ড হবে)
-// =======================================================
-router.patch("/report/mark-sold/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const report = await reportCollection.findOne({ _id: new ObjectId(id) });
-    if (!report) return res.status(404).json({ success: false, message: "Report not found" });
-
-    const purchase = await purchaseCollection.findOne({ _id: new ObjectId(report.orderId) });
-
-    // ১. অর্ডারের স্ট্যাটাস কমপ্লিট
-    await purchaseCollection.updateOne({ _id: new ObjectId(report.orderId) }, { $set: { status: "completed" } });
-
-    // ২. প্রোডাক্টের স্ট্যাটাস 'sold' করা
-    if (purchase && purchase.productId) {
-      await productsCollection.updateOne({ _id: new ObjectId(purchase.productId) }, { $set: { status: "sold" } });
-    }
-
-    // ৩. রিপোর্টের স্ট্যাটাস আপডেট
-    await reportCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "Sold", updatedAt: new Date() } });
-
-    res.json({ success: true, message: "Product marked as sold!" });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
-});
-
-// =======================================================
-// 🚀 ৪. REFUND (রিফান্ড করলে প্রোডাক্ট আবার ACTIVE হবে)
-// =======================================================
-router.patch("/report/refund/:id", async (req, res) => {
+router.patch("/update-status/:id", async (req, res) => {
   const session = client.startSession();
   try {
     const { id } = req.params;
+    const { status, sellerEmail } = req.body;
+
+    if (!ObjectId.isValid(id)) return res.status(400).json({ success: false, message: "Invalid ID" });
+
+    // যদি স্ট্যাটাস completed না হয় (যেমন cancelled), শুধু স্ট্যাটাস আপডেট হবে
+    if (status !== "completed") {
+      await purchaseCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status, updatedAt: new Date() } });
+      return res.json({ success: true, message: `Status updated to ${status}` });
+    }
+
+    // স্ট্যাটাস completed হলে কমিশন ডিস্ট্রিবিউশন হবে
     await session.withTransaction(async () => {
-      const report = await reportCollection.findOne({ _id: new ObjectId(id) }, { session });
-      const purchase = await purchaseCollection.findOne({ _id: new ObjectId(report.orderId) }, { session });
+      const purchase = await purchaseCollection.findOne({ _id: new ObjectId(id) }, { session });
+      if (!purchase) throw new Error("Order not found");
+      if (purchase.status === "completed") throw new Error("Order already completed");
 
-      // বায়ারকে টাকা ফেরত
-      await userCollection.updateOne({ email: purchase.buyerEmail }, { $inc: { balance: purchase.price } }, { session });
+      const amount = Number(purchase.price);
+      const sellerCommission = amount * 0.8;
+      const adminCommission = amount * 0.2;
 
-      // প্রোডাক্ট আবার 'active' করা (যাতে অন্য কেউ কিনতে পারে)
-      await productsCollection.updateOne({ _id: new ObjectId(purchase.productId) }, { $set: { status: "active" } }, { session });
+      // ১. পারচেজ স্ট্যাটাস আপডেট
+      await purchaseCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { status: "completed", updatedAt: new Date() } },
+        { session }
+      );
 
-      // স্ট্যাটাস আপডেট
-      await purchaseCollection.updateOne({ _id: purchase._id }, { $set: { status: "refunded" } }, { session });
-      await reportCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "Refunded" } }, { session });
+      // ২. সেলারের ব্যালেন্স বাড়ানো (৮০%)
+      const sellerUp = await userCollection.updateOne(
+        { email: sellerEmail },
+        { $inc: { balance: sellerCommission } },
+        { session }
+      );
+      if (sellerUp.matchedCount === 0) throw new Error("Seller not found");
+
+      // ৩. এডমিনের ব্যালেন্স বাড়ানো (২০%)
+      await userCollection.updateOne(
+        { email: "admin@gmail.com" }, // আপনার এডমিন ইমেইল
+        { $inc: { balance: adminCommission } },
+        { session }
+      );
+      
+      // ৪. প্রোডাক্ট স্ট্যাটাস 'sold' করা
+      if (purchase.productId) {
+        await productsCollection.updateOne(
+          { _id: new ObjectId(purchase.productId) },
+          { $set: { status: "sold" } },
+          { session }
+        );
+      }
     });
-    res.json({ success: true, message: "Refund done and product is active again!" });
+
+    res.json({ success: true, message: "Order completed and commission distributed" });
   } catch (error) {
-    res.status(500).json({ success: false });
+    console.error("Confirm Error:", error);
+    res.status(500).json({ success: false, message: error.message });
   } finally {
     await session.endSession();
   }
 });
 
 // =======================================================
-// 🚀 ৫. AUTO CONFIRM (24 HOURS)
+// 2. Create Report (POST /report/create)
 // =======================================================
-router.get("/auto-confirm-check", async (req, res) => {
+router.post("/report/create", async (req, res) => {
   try {
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const pendingOrders = await purchaseCollection.find({ status: "pending", purchaseDate: { $lt: twentyFourHoursAgo } }).toArray();
+    const { orderId, reporterEmail, sellerEmail, reason, message, role } = req.body;
 
-    for (let order of pendingOrders) {
-      const sellerComm = order.price * 0.8;
-      const adminComm = order.price * 0.2;
-
-      await purchaseCollection.updateOne({ _id: order._id }, { $set: { status: "completed" } });
-      await userCollection.updateOne({ email: order.sellerEmail }, { $inc: { balance: sellerComm } });
-      await userCollection.updateOne({ email: "admin@gmail.com" }, { $inc: { balance: adminComm } });
-      // প্রোডাক্ট সোল্ড করা
-      await productsCollection.updateOne({ _id: new ObjectId(order.productId) }, { $set: { status: "sold" } });
+    if (!orderId || !reporterEmail || !sellerEmail || !reason || !message) {
+      return res.status(400).json({ success: false, message: "All fields are required" });
     }
-    res.json({ success: true, processed: pendingOrders.length });
-  } catch (err) {
-    res.status(500).json({ success: false });
+
+    const newReport = {
+      orderId, // এটি আপনার পারচেজ আইডির সাথে মিল থাকতে হবে
+      reporterEmail,
+      sellerEmail,
+      reason,
+      message,
+      role: role || "buyer",
+      status: "Pending",
+      createdAt: new Date(),
+    };
+
+    const result = await reportCollection.insertOne(newReport);
+    res.status(201).json({ success: true, message: "Report submitted", reportId: result.insertedId });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// অন্যান্য প্রয়োজনীয় রাউটস...
-router.get("/report/getall", async (req, res) => {
-  const reports = await reportCollection.find({}).sort({ createdAt: -1 }).toArray();
-  res.json(reports);
+// =======================================================
+// 3. Confirm Refund (PATCH /report/refund/:id)
+// =======================================================
+router.patch("/report/refund/:id", async (req, res) => {
+  const session = client.startSession();
+  try {
+    const { id } = req.params; // এটি রিপোর্টের আইডি
+
+    await session.withTransaction(async () => {
+      const report = await reportCollection.findOne({ _id: new ObjectId(id) }, { session });
+      if (!report) throw new Error("Report not found");
+
+      const purchase = await purchaseCollection.findOne({ _id: new ObjectId(report.orderId) }, { session });
+      if (!purchase) throw new Error("Purchase not found");
+      if (purchase.status === "refunded") throw new Error("Already refunded");
+
+      const amount = Number(purchase.price);
+
+      // ১. বায়ারকে টাকা ফেরত দেওয়া
+      await userCollection.updateOne(
+        { email: purchase.buyerEmail },
+        { $inc: { balance: amount } },
+        { session }
+      );
+
+      // ২. প্রোডাক্ট আবার 'active' করা
+      if (purchase.productId) {
+        await productsCollection.updateOne(
+          { _id: new ObjectId(purchase.productId) },
+          { $set: { status: "active" } },
+          { session }
+        );
+      }
+
+      // ৩. পারচেজ এবং রিপোর্ট আপডেট
+      await purchaseCollection.updateOne({ _id: purchase._id }, { $set: { status: "refunded" } }, { session });
+      await reportCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "Refunded" } }, { session });
+    });
+
+    res.json({ success: true, message: "Refund successful" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  } finally {
+    await session.endSession();
+  }
 });
 
+// =======================================================
+// 4. Get Purchases (GET /getall)
+// =======================================================
 router.get("/getall", async (req, res) => {
   const { email, role } = req.query;
-  let query = role === "seller" ? { sellerEmail: email } : { buyerEmail: email };
-  const purchases = await purchaseCollection.find(query).sort({ purchaseDate: -1 }).toArray();
-  res.json(purchases);
+  try {
+    let query = {};
+    if (email) {
+      query = role === "seller" ? { sellerEmail: email } : { buyerEmail: email };
+    }
+    const purchases = await purchaseCollection.find(query).sort({ purchaseDate: -1 }).toArray();
+    res.json(purchases);
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Error fetching data" });
+  }
 });
 
 module.exports = router;
