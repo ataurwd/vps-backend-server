@@ -37,11 +37,9 @@ let db, cartCollection, purchaseCollection, userCollection, productsCollection, 
 router.post("/report/create", async (req, res) => {
   try {
     const { orderId, reporterEmail, sellerEmail, reason, message, role } = req.body;
-
     if (!orderId || !reporterEmail || !sellerEmail || !reason || !message || !role) {
       return res.status(400).json({ success: false, message: "All fields are required" });
     }
-
     const newReport = {
       orderId, 
       reporterEmail,
@@ -52,7 +50,6 @@ router.post("/report/create", async (req, res) => {
       status: "Pending",
       createdAt: new Date(),
     };
-
     const result = await reportCollection.insertOne(newReport);
     res.status(201).json({ success: true, message: "Report submitted", reportId: result.insertedId });
   } catch (error) {
@@ -61,7 +58,7 @@ router.post("/report/create", async (req, res) => {
 });
 
 // =======================================================
-// 🚀 ২. রিফান্ড কনফার্ম করা (Confirm Refund - Fixed)
+// 🚀 ২. রিফান্ড কনফার্ম করা (Confirm Refund)
 // =======================================================
 router.patch("/report/refund/:id", async (req, res) => {
   const session = client.startSession();
@@ -79,10 +76,8 @@ router.patch("/report/refund/:id", async (req, res) => {
       const amount = Number(purchase.price || 0);
       const buyerEmail = purchase.buyerEmail;
 
-      // বায়ারকে টাকা ফেরত
       await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: amount } }, { session });
 
-      // প্রোডাক্ট একটিভ করা
       if (purchase.productId) {
         await productsCollection.updateOne({ _id: new ObjectId(purchase.productId) }, { $set: { status: "active" } }, { session });
       }
@@ -100,57 +95,72 @@ router.patch("/report/refund/:id", async (req, res) => {
 });
 
 // =======================================================
-// 🚀 ৩. অটো-কনফার্ম (১ ঘণ্টা পর অর্ডার অটোমেটিক কমপ্লিট হবে)
+// 🚀 ৩. মার্ক সোল্ড (Mark as Sold - FIXED)
+// =======================================================
+router.patch("/report/mark-sold/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).json({ success: false, message: "Invalid ID" });
+
+    const report = await reportCollection.findOne({ _id: new ObjectId(id) });
+    if (!report) return res.status(404).json({ success: false, message: "Report not found" });
+
+    // অর্ডারের স্ট্যাটাস কমপ্লিট করা
+    await purchaseCollection.updateOne(
+      { _id: new ObjectId(report.orderId) }, 
+      { $set: { status: "completed" } }
+    );
+
+    // রিপোর্টের স্ট্যাটাস 'Sold' করা
+    await reportCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status: "Sold", updatedAt: new Date() } }
+    );
+
+    res.json({ success: true, message: "Marked as sold successfully" });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// =======================================================
+// 🚀 ৪. অটো-কনফার্ম (২৪ ঘণ্টা পর অটোমেটিক কমপ্লিট হবে)
 // =======================================================
 router.get("/auto-confirm-check", async (req, res) => {
   try {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
-    // ১ ঘণ্টার বেশি পুরনো "pending" অর্ডারগুলো খুঁজুন
     const pendingOrders = await purchaseCollection.find({
       status: "pending",
-      purchaseDate: { $lt: oneHourAgo }
+      purchaseDate: { $lt: twentyFourHoursAgo }
     }).toArray();
 
-    if (pendingOrders.length === 0) {
-      return res.json({ success: true, message: "No pending orders to confirm" });
-    }
+    if (pendingOrders.length === 0) return res.json({ success: true, message: "No orders to confirm" });
 
-    let count = 0;
     for (let order of pendingOrders) {
       const amount = Number(order.price || 0);
       const sellerEmail = order.sellerEmail;
-      const sellerCommission = amount * 0.8;
-      const adminCommission = amount * 0.2;
+      const sellerComm = amount * 0.8;
+      const adminComm = amount * 0.2;
 
-      // ট্রানজ্যাকশন ছাড়াই লুপের মধ্যে আপডেট করা হচ্ছে (সহজ রাখার জন্য)
-      // অর্ডার কমপ্লিট করা
       await purchaseCollection.updateOne({ _id: order._id }, { $set: { status: "completed", autoConfirmed: true } });
-      
-      // সেলারকে টাকা দেওয়া
-      await userCollection.updateOne({ email: sellerEmail }, { $inc: { balance: sellerCommission } });
-      
-      // এডমিনকে টাকা দেওয়া
-      await userCollection.updateOne({ email: "admin@gmail.com" }, { $inc: { balance: adminCommission } });
-      
-      count++;
+      await userCollection.updateOne({ email: sellerEmail }, { $inc: { balance: sellerComm } });
+      await userCollection.updateOne({ email: "admin@gmail.com" }, { $inc: { balance: adminComm } });
     }
 
-    res.json({ success: true, message: `${count} orders auto-confirmed successfully!` });
+    res.json({ success: true, message: `${pendingOrders.length} orders auto-confirmed!` });
   } catch (err) {
-    console.error("Auto-confirm error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
 // =======================================================
-// 🚀 ৪. অর্ডারের স্ট্যাটাস আপডেট (Confirm/Reject Manual)
+// 🚀 ৫. ম্যানুয়াল স্ট্যাটাস আপডেট
 // =======================================================
 router.patch("/update-status/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status, sellerEmail } = req.body;
-
     if (!ObjectId.isValid(id) || !status) return res.status(400).json({ success: false, message: "Invalid ID/Status" });
 
     if (status !== "completed") {
@@ -165,12 +175,9 @@ router.patch("/update-status/:id", async (req, res) => {
         if (!purchase) throw new Error("Purchase not found");
 
         const amount = Number(purchase.price || 0);
-        const sellerCommission = amount * 0.8;
-        const adminCommission = amount * 0.2;
-
         await purchaseCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status: "completed" } }, { session });
-        await userCollection.updateOne({ email: sellerEmail }, { $inc: { balance: sellerCommission } }, { session });
-        await userCollection.updateOne({ email: "admin@gmail.com" }, { $inc: { balance: adminCommission } }, { session });
+        await userCollection.updateOne({ email: sellerEmail }, { $inc: { balance: amount * 0.8 } }, { session });
+        await userCollection.updateOne({ email: "admin@gmail.com" }, { $inc: { balance: amount * 0.2 } }, { session });
       });
       res.json({ success: true, message: "Order completed successfully" });
     } finally {
@@ -182,87 +189,59 @@ router.patch("/update-status/:id", async (req, res) => {
 });
 
 // =======================================================
-// 🚀 ৫. অন্যান্য রাউটস (Checkout, Purchases, Reports)
+// 🚀 ৬. অন্যান্য (Checkout & Fetch)
 // =======================================================
 
 router.get("/report/getall", async (req, res) => {
   try {
     const reports = await reportCollection.find({}).sort({ createdAt: -1 }).toArray();
     res.json(reports);
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
+  } catch (e) { res.status(500).json([]); }
 });
 
 router.get("/getall", async (req, res) => {
   const { email, role } = req.query;
   try {
     let query = role === "seller" ? { sellerEmail: email } : { buyerEmail: email };
-    const purchases = await purchaseCollection.find(query).sort({ purchaseDate: -1 }).toArray();
-    res.json(purchases);
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
+    const result = await purchaseCollection.find(query).sort({ purchaseDate: -1 }).toArray();
+    res.json(result);
+  } catch (e) { res.status(500).json([]); }
 });
 
 router.post("/post", async (req, res) => {
   const { email: buyerEmail } = req.body;
   try {
     const cartItems = await cartCollection.find({ UserEmail: buyerEmail }).toArray();
-    if (!cartItems.length) return res.status(400).json({ success: false, message: "Cart empty" });
-
+    if (!cartItems.length) return res.status(400).json({ success: false });
     const totalPrice = cartItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
     const buyer = await userCollection.findOne({ email: buyerEmail });
-
-    if (!buyer || buyer.balance < totalPrice) return res.status(400).json({ success: false, message: "Insufficient balance" });
+    if (!buyer || buyer.balance < totalPrice) return res.status(400).json({ success: false });
 
     await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -totalPrice } });
-
     const purchaseDocs = cartItems.map(item => ({
-      buyerEmail,
-      productName: item.name,
-      price: Number(item.price),
-      sellerEmail: item.sellerEmail,
-      productId: item.productId ? new ObjectId(item.productId) : null,
-      purchaseDate: new Date(),
-      status: "pending",
+      buyerEmail, productName: item.name, price: Number(item.price), sellerEmail: item.sellerEmail,
+      productId: item.productId ? new ObjectId(item.productId) : null, purchaseDate: new Date(), status: "pending",
     }));
-
     await purchaseCollection.insertMany(purchaseDocs);
     await cartCollection.deleteMany({ UserEmail: buyerEmail });
-
-    res.json({ success: true, message: "Purchase successful" });
-  } catch (err) {
-    res.status(500).json({ success: false });
-  }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false }); }
 });
 
 router.post("/single-purchase", async (req, res) => {
   try {
     const { buyerEmail, productName, price, sellerEmail, productId } = req.body;
-    const amount = Number(price);
     const buyer = await userCollection.findOne({ email: buyerEmail });
+    if (!buyer || buyer.balance < price) return res.status(400).json({ success: false });
 
-    if (!buyer || buyer.balance < amount) return res.status(400).json({ success: false, message: "Insufficient balance" });
-
-    const purchaseData = {
-      buyerEmail,
-      productName,
-      price: amount,
-      sellerEmail,
-      productId: new ObjectId(productId),
-      purchaseDate: new Date(),
-      status: "pending"
-    };
-
-    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -amount } });
-    await purchaseCollection.insertOne(purchaseData);
+    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -Number(price) } });
+    await purchaseCollection.insertOne({
+      buyerEmail, productName, price: Number(price), sellerEmail,
+      productId: new ObjectId(productId), purchaseDate: new Date(), status: "pending"
+    });
     await productsCollection.updateOne({ _id: new ObjectId(productId) }, { $set: { status: "ongoing" } });
-
-    res.json({ success: true, message: "Purchase successful" });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false }); }
 });
 
 module.exports = router;
