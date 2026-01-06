@@ -365,4 +365,23 @@ router.post('/getall/:userId', async (req, res) => {
   }
 });
 
+
+
+//seller blcok
+// --- BLOCK/ACTIVATE USER ---
+router.patch("/update-status/:id", async (req, res) => {
+  try {
+    const id = new ObjectId(req.params.id);
+    const { status } = req.body; // 'active' or 'blocked'
+    const result = await users.updateOne(
+      { _id: id },
+      { $set: { status: status } }
+    );
+    res.json({ success: true, message: "User status updated" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 module.exports = router;
