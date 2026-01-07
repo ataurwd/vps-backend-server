@@ -740,43 +740,46 @@ router.patch("/report/update/:id", async (req, res) => {
 // ... আপনার ইমপোর্ট এবং কানেকশন কোড ঠিক আছে ...
 
 // =======================================================
-// 🚀 ১. অটো-ক্যান্সেল রাউট (অর্ডার ১ ঘণ্টা পার হলে ক্যান্সেল হবে)
-// =======================================================
-router.get("/auto-cancel-check", async (req, res) => {
+router.get("/auto-confirm-check", async (req, res) => {
   try {
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    // ৪ ঘণ্টা আগের সময় নির্ধারণ (৪ ঘণ্টা = ৪ * ৬০ * ৬০ * ১০০০ মিলিসেকেন্ড)
+    const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
 
-    // ১ ঘণ্টার বেশি পুরনো "pending" অর্ডারগুলো খুঁজুন
-    const expiredOrders = await purchaseCollection.find({
+    // ৪ ঘণ্টার বেশি পুরনো "pending" অর্ডারগুলো খুঁজুন
+    const pendingOrders = await purchaseCollection.find({
       status: "pending",
-      purchaseDate: { $lt: oneHourAgo }
+      purchaseDate: { $lt: fourHoursAgo }
     }).toArray();
 
-    if (expiredOrders.length > 0) {
-      const ids = expiredOrders.map(order => order._id);
-      const productIds = expiredOrders.map(order => order.productId).filter(id => id);
+    if (pendingOrders.length > 0) {
+      const ids = pendingOrders.map(order => order._id);
 
-      // অর্ডার স্ট্যাটাস 'cancelled' করা
-      await purchaseCollection.updateMany(
+      // অর্ডার স্ট্যাটাস 'confirmed' করা
+      const result = await purchaseCollection.updateMany(
         { _id: { $in: ids } },
-        { $set: { status: "cancelled", updatedAt: new Date() } }
+        { 
+          $set: { 
+            status: "confirmed", 
+            updatedAt: new Date(),
+            confirmedAt: new Date() // কনফার্ম হওয়ার সময় ট্র্যাক করার জন্য (ঐচ্ছিক)
+          } 
+        }
       );
 
-      // প্রোডাক্ট আবার 'active' করা যাতে অন্য কেউ কিনতে পারে
-      if (productIds.length > 0) {
-        await productsCollection.updateMany(
-          { _id: { $in: productIds } },
-          { $set: { status: "active" } }
-        );
-      }
+      /* যেহেতু অর্ডার কনফার্ম হচ্ছে, তাই প্রোডাক্ট 'active' করার প্রয়োজন নেই। 
+         প্রোডাক্টটি অলরেডি সোল্ড বা বুকড হিসেবেই থাকবে।
+      */
     }
 
-    res.json({ success: true, processed: expiredOrders.length });
+    res.json({ 
+      success: true, 
+      message: `${pendingOrders.length} orders confirmed.`,
+      processed: pendingOrders.length 
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
-
 
 // =======================================================
 // 🚀 NEW: Mark as Sold (অর্ডার কমপ্লিট করা)
@@ -807,68 +810,10 @@ router.patch("/report/mark-sold/:id", async (req, res) => {
   }
 });
 
-// =======================================================
-// 🚀 NEW: Confirm Refund (বায়ারকে টাকা ফেরত দেওয়া)
-// =======================================================
-// router.patch("/report/refund/:id", async (req, res) => {
-//   const session = client.startSession();
-//   try {
-//     const { id } = req.params;
-
-//     await session.withTransaction(async () => {
-//       // ১. রিপোর্ট থেকে ডাটা নিন
-//       const report = await reportCollection.findOne({ _id: new ObjectId(id) }, { session });
-//       if (!report) throw new Error("Report not found");
-
-//       // ২. সংশ্লিষ্ট পারচেজ ডাটা থেকে প্রাইস বের করুন
-//       const purchase = await purchaseCollection.findOne({ orderId: report.orderId }, { session });
-//       if (!purchase) throw new Error("Purchase order not found");
-
-//       const amount = Number(purchase.price || purchase.amount);
-//       const buyerEmail = purchase.buyerEmail || report.reporterEmail; // যে রিপোর্ট করেছে বা যে বায়ার
-
-//       // ৩. বায়ারের ব্যালেন্স ফেরত দিন
-//       await userCollection.updateOne(
-//         { email: buyerEmail },
-//         { $inc: { balance: amount } },
-//         { session }
-//       );
-
-//       // ৪. প্রোডাক্ট আবার 'active' করুন যাতে অন্য কেউ কিনতে পারে
-//       if (purchase.productId) {
-//         await productsCollection.updateOne(
-//           { _id: new ObjectId(purchase.productId) },
-//           { $set: { status: "active" } },
-//           { session }
-//         );
-//       }
-
-//       // ৫. অর্ডার 'refunded' এবং রিপোর্ট 'Solved/Refunded' করুন
-//       await purchaseCollection.updateOne(
-//         { _id: purchase._id },
-//         { $set: { status: "refunded" } },
-//         { session }
-//       );
-
-//       await reportCollection.updateOne(
-//         { _id: new ObjectId(id) },
-//         { $set: { status: "Refunded", updatedAt: new Date() } },
-//         { session }
-//       );
-//     });
-
-//     res.json({ success: true, message: "Refund processed and balance returned!" });
-//   } catch (error) {
-//     console.error("Refund Error:", error);
-//     res.status(500).json({ success: false, message: error.message });
-//   } finally {
-//     await session.endSession();
-//   }
-// });
 
 
 // =======================================================
-// 🚀 FIXED: Confirm Refund (বায়ারকে টাকা ফেরত দেওয়া)
+// 🚀 FIXED: Confirm Refund (বায়ারকে টাকা ফেরত দেওয়া)
 // =======================================================
 router.patch("/report/refund/:id", async (req, res) => {
   const session = client.startSession();
