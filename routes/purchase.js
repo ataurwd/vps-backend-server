@@ -810,61 +810,61 @@ router.patch("/report/mark-sold/:id", async (req, res) => {
 // =======================================================
 // 🚀 NEW: Confirm Refund (বায়ারকে টাকা ফেরত দেওয়া)
 // =======================================================
-router.patch("/report/refund/:id", async (req, res) => {
-  const session = client.startSession();
-  try {
-    const { id } = req.params;
+// router.patch("/report/refund/:id", async (req, res) => {
+//   const session = client.startSession();
+//   try {
+//     const { id } = req.params;
 
-    await session.withTransaction(async () => {
-      // ১. রিপোর্ট থেকে ডাটা নিন
-      const report = await reportCollection.findOne({ _id: new ObjectId(id) }, { session });
-      if (!report) throw new Error("Report not found");
+//     await session.withTransaction(async () => {
+//       // ১. রিপোর্ট থেকে ডাটা নিন
+//       const report = await reportCollection.findOne({ _id: new ObjectId(id) }, { session });
+//       if (!report) throw new Error("Report not found");
 
-      // ২. সংশ্লিষ্ট পারচেজ ডাটা থেকে প্রাইস বের করুন
-      const purchase = await purchaseCollection.findOne({ orderId: report.orderId }, { session });
-      if (!purchase) throw new Error("Purchase order not found");
+//       // ২. সংশ্লিষ্ট পারচেজ ডাটা থেকে প্রাইস বের করুন
+//       const purchase = await purchaseCollection.findOne({ orderId: report.orderId }, { session });
+//       if (!purchase) throw new Error("Purchase order not found");
 
-      const amount = Number(purchase.price || purchase.amount);
-      const buyerEmail = purchase.buyerEmail || report.reporterEmail; // যে রিপোর্ট করেছে বা যে বায়ার
+//       const amount = Number(purchase.price || purchase.amount);
+//       const buyerEmail = purchase.buyerEmail || report.reporterEmail; // যে রিপোর্ট করেছে বা যে বায়ার
 
-      // ৩. বায়ারের ব্যালেন্স ফেরত দিন
-      await userCollection.updateOne(
-        { email: buyerEmail },
-        { $inc: { balance: amount } },
-        { session }
-      );
+//       // ৩. বায়ারের ব্যালেন্স ফেরত দিন
+//       await userCollection.updateOne(
+//         { email: buyerEmail },
+//         { $inc: { balance: amount } },
+//         { session }
+//       );
 
-      // ৪. প্রোডাক্ট আবার 'active' করুন যাতে অন্য কেউ কিনতে পারে
-      if (purchase.productId) {
-        await productsCollection.updateOne(
-          { _id: new ObjectId(purchase.productId) },
-          { $set: { status: "active" } },
-          { session }
-        );
-      }
+//       // ৪. প্রোডাক্ট আবার 'active' করুন যাতে অন্য কেউ কিনতে পারে
+//       if (purchase.productId) {
+//         await productsCollection.updateOne(
+//           { _id: new ObjectId(purchase.productId) },
+//           { $set: { status: "active" } },
+//           { session }
+//         );
+//       }
 
-      // ৫. অর্ডার 'refunded' এবং রিপোর্ট 'Solved/Refunded' করুন
-      await purchaseCollection.updateOne(
-        { _id: purchase._id },
-        { $set: { status: "refunded" } },
-        { session }
-      );
+//       // ৫. অর্ডার 'refunded' এবং রিপোর্ট 'Solved/Refunded' করুন
+//       await purchaseCollection.updateOne(
+//         { _id: purchase._id },
+//         { $set: { status: "refunded" } },
+//         { session }
+//       );
 
-      await reportCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: "Refunded", updatedAt: new Date() } },
-        { session }
-      );
-    });
+//       await reportCollection.updateOne(
+//         { _id: new ObjectId(id) },
+//         { $set: { status: "Refunded", updatedAt: new Date() } },
+//         { session }
+//       );
+//     });
 
-    res.json({ success: true, message: "Refund processed and balance returned!" });
-  } catch (error) {
-    console.error("Refund Error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  } finally {
-    await session.endSession();
-  }
-});
+//     res.json({ success: true, message: "Refund processed and balance returned!" });
+//   } catch (error) {
+//     console.error("Refund Error:", error);
+//     res.status(500).json({ success: false, message: error.message });
+//   } finally {
+//     await session.endSession();
+//   }
+// });
 
 
 // =======================================================
@@ -876,54 +876,48 @@ router.patch("/report/refund/:id", async (req, res) => {
     const { id } = req.params;
 
     if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid Report ID" });
+      return res.status(400).json({ success: false, message: "Invalid report id" });
     }
 
     await session.withTransaction(async () => {
-      // ১. রিপোর্ট থেকে ডাটা নিন
-      const report = await reportCollection.findOne({ _id: new ObjectId(id) }, { session });
+      // 1️⃣ রিপোর্ট খোঁজা
+      const report = await reportCollection.findOne(
+        { _id: new ObjectId(id) },
+        { session }
+      );
       if (!report) throw new Error("Report not found");
 
-      // ২. সংশ্লিষ্ট পারচেজ ডাটা খোঁজা (String ID-কে ObjectId তে রূপান্তর করা হয়েছে)
-      const purchase = await purchaseCollection.findOne(
-        { _id: new ObjectId(report.orderId) }, 
+      // 2️⃣ অর্ডার খোঁজা
+      const order = await purchaseCollection.findOne(
+        { _id: new ObjectId(report.orderId) },
         { session }
       );
-      
-      if (!purchase) {
-        throw new Error(`Main Purchase record not found for Order ID: ${report.orderId}`);
-      }
+      if (!order) throw new Error("Order not found");
 
-      const amount = Number(purchase.price || 0);
-      const buyerEmail = purchase.buyerEmail;
-
-      // ৩. বায়ারের ব্যালেন্স ফেরত দেওয়া
-      const userUpdate = await userCollection.updateOne(
-        { email: buyerEmail },
-        { $inc: { balance: amount } },
+      // 3️⃣ Buyer টাকা ফেরত
+      await userCollection.updateOne(
+        { email: order.buyerEmail },
+        { $inc: { balance: Number(order.price) } },
         { session }
       );
 
-      if (userUpdate.matchedCount === 0) {
-        throw new Error(`Buyer account (${buyerEmail}) not found`);
-      }
-
-      // ৪. প্রোডাক্ট আবার 'active' করা যাতে অন্য কেউ কিনতে পারে
-      if (purchase.productId) {
+      // 4️⃣ Product আবার active
+      if (order.productId) {
         await productsCollection.updateOne(
-          { _id: new ObjectId(purchase.productId) },
+          { _id: new ObjectId(order.productId) },
           { $set: { status: "active" } },
           { session }
         );
       }
 
-      // ৫. অর্ডার এবং রিপোর্ট স্ট্যাটাস আপডেট করা
+      // 5️⃣ Order status → refunded
       await purchaseCollection.updateOne(
-        { _id: purchase._id },
-        { $set: { status: "refunded", updatedAt: new Date() } },
+        { _id: order._id },
+        { $set: { status: "refunded" } },
         { session }
       );
 
+      // 6️⃣ Report status → Refunded
       await reportCollection.updateOne(
         { _id: new ObjectId(id) },
         { $set: { status: "Refunded", updatedAt: new Date() } },
@@ -931,14 +925,14 @@ router.patch("/report/refund/:id", async (req, res) => {
       );
     });
 
-    res.json({ success: true, message: "Refund successful and balance returned!" });
-  } catch (error) {
-    console.error("❌ Refund Error:", error.message);
-    res.status(500).json({ success: false, message: error.message });
+    res.json({ success: true, message: "Refund completed successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   } finally {
     await session.endSession();
   }
 });
+
 
 
 module.exports = router;
