@@ -809,7 +809,23 @@ router.patch("/report/mark-sold/:id", async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+// আপনার রিপোর্ট কালেকশন থেকে ডাটা আনার রুট
+router.get("/my-reports", async (req, res) => {
+  try {
+    const email = req.query.email; // ফ্রন্টএন্ড থেকে কুয়েরি প্যারামিটার হিসেবে ইমেইল আসবে
+    
+    if (!email) {
+      return res.status(400).send({ message: "Email is required" });
+    }
 
+    const query = { email: email }; // আপনার DB-তে ইমেইল ফিল্ডের নাম 'email' হলে এটা ঠিক আছে
+    const result = await reportCollection.find(query).toArray();
+    
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ success: false, message: error.message });
+  }
+});
 
 
 // =======================================================
