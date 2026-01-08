@@ -812,13 +812,14 @@ router.patch("/report/mark-sold/:id", async (req, res) => {
 // আপনার রিপোর্ট কালেকশন থেকে ডাটা আনার রুট
 router.get("/my-reports", async (req, res) => {
   try {
-    const email = req.query.email; // ফ্রন্টএন্ড থেকে কুয়েরি প্যারামিটার হিসেবে ইমেইল আসবে
+    const email = req.query.email; 
     
     if (!email) {
-      return res.status(400).send({ message: "Email is required" });
+      return res.status(400).send({ success: false, message: "Email is required" });
     }
 
-    const query = { email: email }; // আপনার DB-তে ইমেইল ফিল্ডের নাম 'email' হলে এটা ঠিক আছে
+    // Change 'email' to 'sellerEmail' to match your database screenshot
+    const query = { sellerEmail: email }; 
     const result = await reportCollection.find(query).toArray();
     
     res.send(result);
