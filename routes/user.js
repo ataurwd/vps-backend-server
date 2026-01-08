@@ -11,7 +11,8 @@
 
 // // Connect to DB
 // async function run() {
-//   try {
+//   tr
+// y {
 //     await client.connect();
 //   } catch (error) {
 //   }
@@ -570,6 +571,22 @@ router.patch("/update-status/:id", async (req, res) => {
       { $set: { status: status } }
     );
     res.json({ success: true, message: "User status updated" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// --- CHECK USER STATUS ---
+// GET /api/user/status?email=someone@example.com
+router.get("/status", async (req, res) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+
+    const user = await users.findOne({ email: String(email) });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    res.json({ success: true, status: user.status || "active", role: user.role || "buyer" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
