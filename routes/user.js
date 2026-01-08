@@ -471,8 +471,13 @@ router.post("/login", async (req, res) => {
   const { email, password } = req.body;
   const user = await users.findOne({ email });
   if (!user) return res.status(404).json({ success: false, message: "User not found" });
+  // prevent blocked sellers from logging in
+  if (user.role === "seller" && user.status === "blocked") {
+    return res.status(403).json({ success: false, message: "Account blocked by admin" });
+  }
+
   if (user.password !== password) return res.status(400).json({ success: false, message: "Wrong password" });
-  
+
   res.json({ success: true, message: "Login successful", user });
 });
 
