@@ -269,7 +269,7 @@ async function run() {
         const { userId } = req.params;
         const doc = await presenceCollection.findOne({ userId });
         const lastSeen = doc?.lastSeen || null;
-        const online = lastSeen ? (Date.now() - new Date(lastSeen).getTime()) < 60000 : false; // online if seen within 60s
+        const online = lastSeen ? (Date.now() - new Date(lastSeen).getTime()) < 300000 : false; // online if seen within 5 minutes
         return res.status(200).json({ userId, lastSeen, online });
       } catch (error) {
         console.error('Get Status Error:', error);
@@ -288,7 +288,7 @@ async function run() {
         [user1, user2].forEach(u => {
           const doc = docs.find(d => d.userId === u);
           const lastSeen = doc?.lastSeen || null;
-          const online = lastSeen ? (Date.now() - new Date(lastSeen).getTime()) < 60000 : false;
+          const online = lastSeen ? (Date.now() - new Date(lastSeen).getTime()) < 300000 : false; // 5 minutes
           map[u] = { userId: u, lastSeen, online };
         });
         return res.status(200).json(map);
