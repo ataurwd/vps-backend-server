@@ -7,20 +7,31 @@ const router = express.Router();
 const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
-// MongoDB
+// ================= MongoDB =================
 const client = new MongoClient(MONGO_URI);
 const db = client.db("mydb");
+
 const payments = db.collection("payments");
+const users = db.collection("userCollection");
 
 (async () => {
   await client.connect();
-  console.log("MongoDB connected");
+  console.log("MongoDB connected (Flutterwave)");
 })();
 
-// CREATE PAYMENT (Redirect link)
+// ================= CREATE PAYMENT =================
 router.post("/create", async (req, res) => {
   try {
-    const { name, email, amount } = req.body;
+    const amount = Number(req.body.amount);
+    const email = req.body.email; // ✅ LOGIN USER EMAIL (frontend)
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email required" });
+    }
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ success: false, message: "Invalid amount" });
+    }
 
     const tx_ref = "flw-" + Date.now();
 
@@ -28,62 +39,74 @@ router.post("/create", async (req, res) => {
       tx_ref,
       amount,
       currency: "USD",
-      redirect_url: "http://localhost:3000/wallet",
-      customer: { name, email },
-      customizations: {
-        title: "AcctEmpire Deposit",
-        description: "Wallet funding",
+      redirect_url: `http://localhost:3000/payment?tx_ref=${tx_ref}`,
+      customer: {
+        email, // ✅ REQUIRED BY FLUTTERWAVE
       },
     };
 
     const response = await axios.post(
       "https://api.flutterwave.com/v3/payments",
       payload,
-      {
-        headers: {
-          Authorization: `Bearer ${FLW_SECRET_KEY}`,
-        },
-      }
+      { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
     );
 
     await payments.insertOne({
       tx_ref,
-      email,
+      customerEmail: email, // ✅ OUR SOURCE OF TRUTH
       amount,
       status: "pending",
+      credited: false,
       createdAt: new Date(),
     });
 
-    res.json({ link: response.data.data.link });
+    res.json({ success: true, link: response.data.data.link });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// VERIFY PAYMENT
-router.get("/verify/:tx_ref", async (req, res) => {
+// ================= VERIFY PAYMENT =================
+router.get("/verify", async (req, res) => {
   try {
-    const { tx_ref } = req.params;
+    const { tx_ref } = req.query;
 
     const response = await axios.get(
       `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
+      { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
+    );
+
+    const data = response.data.data;
+    if (data.status !== "successful") {
+      return res.json({ success: false });
+    }
+
+    // 🔥 OUR DB = SOURCE OF TRUTH
+    const payment = await payments.findOne({ tx_ref });
+    if (!payment || payment.credited) {
+      return res.json({ success: true });
+    }
+
+    await payments.updateOne(
+      { tx_ref },
       {
-        headers: {
-          Authorization: `Bearer ${FLW_SECRET_KEY}`,
+        $set: {
+          transactionId: data.id,
+          status: "successful",
+          credited: true,
+          verifiedAt: new Date(),
         },
       }
     );
 
-    const status = response.data.data.status;
-
-    await payments.updateOne(
-      { tx_ref },
-      { $set: { status, flutterwaveData: response.data.data } }
+    await users.updateOne(
+      { email: payment.customerEmail },
+      { $inc: { balance: Number(payment.amount) } }
     );
 
-    res.json({ status });
+    res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
