@@ -1,6 +1,5 @@
 const express = require("express");
 const axios = require("axios");
-const crypto = require("crypto");
 const { MongoClient } = require("mongodb");
 
 const router = express.Router();
@@ -8,32 +7,36 @@ const router = express.Router();
 const KORAPAY_SECRET_KEY = process.env.KORAPAY_SECRET_KEY;
 const MONGO_URI = process.env.MONGO_URI;
 
-// Mongo
+// ================= Mongo =================
 const client = new MongoClient(MONGO_URI);
 const db = client.db("mydb");
-const payments = db.collection("payments");
 
-(async () => await client.connect())();
+const payments = db.collection("payments");
+const users = db.collection("userCollection");
+
+(async () => {
+  await client.connect();
+  console.log("MongoDB connected (Korapay)");
+})();
 
 // ================= CREATE PAYMENT =================
 router.post("/create", async (req, res) => {
   try {
-    const { amount, user } = req.body;
+    const { amount, email } = req.body;
 
-    if (!amount || !user?.email || !user?.name) {
-      return res.status(400).json({ error: "Invalid payload" });
+    if (!amount || !email) {
+      return res.status(400).json({ message: "Invalid payload" });
     }
 
     const reference = "kora-" + Date.now();
 
     const payload = {
-      amount: String(amount), // MUST be string
+      amount: String(amount), // Korapay requires string
       currency: "NGN",
       reference,
-      redirect_url: "http://localhost:3000/payment-done",
+      redirect_url: `http://localhost:3000/payment?reference=${reference}`,
       customer: {
-        name: user.name,
-        email: user.email,
+        email, // ✅ LOGIN USER EMAIL
       },
     };
 
@@ -48,69 +51,102 @@ router.post("/create", async (req, res) => {
       }
     );
 
+    // 🔐 SOURCE OF TRUTH
     await payments.insertOne({
       reference,
-      amount,
-      email: user.email,
+      customerEmail: email,
+      amount: Number(amount),
+      method: "korapay",
       status: "pending",
+      credited: false,
       createdAt: new Date(),
     });
 
     res.json({
       checkoutUrl: kpRes.data.data.checkout_url,
-      reference,
     });
   } catch (err) {
     console.error("Korapay create error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Korapay create failed" });
+    res.status(500).json({ message: "Korapay create failed" });
   }
 });
 
-// ================= VERIFY =================
-router.get("/verify/:reference", async (req, res) => {
+// ================= VERIFY (MANUAL REDIRECT) =================
+router.get("/verify", async (req, res) => {
   try {
-    const { reference } = req.params;
+    const { reference } = req.query;
+    if (!reference) return res.status(400).json({ success: false });
 
     const kpRes = await axios.get(
       `https://api.korapay.com/merchant/api/v1/transactions/${reference}`,
       {
-        headers: {
-          Authorization: `Bearer ${KORAPAY_SECRET_KEY}`,
+        headers: { Authorization: `Bearer ${KORAPAY_SECRET_KEY}` },
+      }
+    );
+
+    const data = kpRes.data.data;
+    if (data.status !== "successful") {
+      return res.json({ success: false });
+    }
+
+    const payment = await payments.findOne({ reference });
+    if (!payment || payment.credited) {
+      return res.json({ success: true });
+    }
+
+    // ✅ UPDATE PAYMENT
+    await payments.updateOne(
+      { reference },
+      {
+        $set: {
+          status: "successful",
+          transactionId: data.id,
+          credited: true,
+          verifiedAt: new Date(),
         },
       }
     );
 
-    const status = kpRes.data.data.status;
-
-    await payments.updateOne(
-      { reference },
-      { $set: { status, verifiedAt: new Date() } }
+    // ✅ ADD BALANCE
+    await users.updateOne(
+      { email: payment.customerEmail },
+      { $inc: { balance: payment.amount } }
     );
 
-    res.json({ status });
+    res.json({ success: true });
   } catch (err) {
     console.error("Korapay verify error:", err.response?.data || err.message);
-    res.status(500).json({ error: "Verification failed" });
+    res.status(500).json({ success: false });
   }
 });
 
 // ================= WEBHOOK =================
-// ⚠️ Webhook signature verify optional for now
 router.post("/webhook", async (req, res) => {
   try {
     const data = req.body?.data;
     if (!data?.reference) return res.sendStatus(200);
 
-    await payments.updateOne(
-      { reference: data.reference },
-      {
-        $set: {
-          status: data.status,
-          webhookReceived: true,
-          webhookData: req.body,
-        },
-      }
-    );
+    const payment = await payments.findOne({ reference: data.reference });
+    if (!payment || payment.credited) return res.sendStatus(200);
+
+    if (data.status === "successful") {
+      await payments.updateOne(
+        { reference: data.reference },
+        {
+          $set: {
+            status: "successful",
+            credited: true,
+            webhookReceived: true,
+            verifiedAt: new Date(),
+          },
+        }
+      );
+
+      await users.updateOne(
+        { email: payment.customerEmail },
+        { $inc: { balance: payment.amount } }
+      );
+    }
 
     res.sendStatus(200);
   } catch (err) {
