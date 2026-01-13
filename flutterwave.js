@@ -23,7 +23,7 @@ const users = db.collection("userCollection");
 router.post("/create", async (req, res) => {
   try {
     const amount = Number(req.body.amount);
-    const email = req.body.email; // ✅ LOGIN USER EMAIL (frontend)
+    const email = req.body.email; // ✅ LOGIN USER EMAIL
 
     if (!email) {
       return res.status(400).json({ success: false, message: "Email required" });
@@ -41,7 +41,7 @@ router.post("/create", async (req, res) => {
       currency: "USD",
       redirect_url: `http://localhost:3000/payment?tx_ref=${tx_ref}`,
       customer: {
-        email, // ✅ REQUIRED BY FLUTTERWAVE
+        email, // REQUIRED BY FLUTTERWAVE
       },
     };
 
@@ -51,9 +51,10 @@ router.post("/create", async (req, res) => {
       { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
     );
 
+    // 🔐 SOURCE OF TRUTH
     await payments.insertOne({
       tx_ref,
-      customerEmail: email, // ✅ OUR SOURCE OF TRUTH
+      customerEmail: email,
       amount,
       status: "pending",
       credited: false,
@@ -81,7 +82,7 @@ router.get("/verify", async (req, res) => {
       return res.json({ success: false });
     }
 
-    // 🔥 OUR DB = SOURCE OF TRUTH
+    // 🔥 OUR DB IS SOURCE OF TRUTH
     const payment = await payments.findOne({ tx_ref });
     if (!payment || payment.credited) {
       return res.json({ success: true });
