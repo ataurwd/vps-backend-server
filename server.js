@@ -72,6 +72,7 @@ const cartRoute = require("./routes/cart");
 const testPaymentRoute = require("./routes/testpayment");
 const withdrawRoute = require("./routes/withdraw");
 const purchaseRoute = require("./routes/purchase");
+const refarelRoute = require("./routes/refarel");
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
