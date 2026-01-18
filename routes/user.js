@@ -595,6 +595,199 @@
 
 // module.exports = router;
 
+// const express = require("express");
+// const { MongoClient, ObjectId } = require("mongodb");
+// const router = express.Router();
+
+// // MongoDB Setup
+// const MONGO_URI = process.env.MONGO_URI;
+// const client = new MongoClient(MONGO_URI);
+// const db = client.db("mydb");
+// const users = db.collection("userCollection");
+
+// // Connect to DB once
+// async function run() {
+//   try {
+//     await client.connect();
+//     console.log("Connected to MongoDB");
+//   } catch (error) {
+//     console.error("DB connection error:", error);
+//   }
+// }
+// run();
+
+// // --- REGISTER (FIXED & MERGED) ---
+// router.post("/register", async (req, res) => {
+//   try {
+//     const userData = req.body;
+//     const referredByCode = userData.referredBy;
+
+//     // ১. ইউনিক রেফারাল কোড জেনারেট করা (যদি ফ্রন্টএন্ড থেকে না আসে)
+//     if (!userData.referralCode) {
+//       userData.referralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+//     }
+
+//     // ২. ডিফল্ট ফিল্ড সেট করা
+//     if (!userData.balance) userData.balance = 0;
+//     if (!userData.role) userData.role = "buyer";
+//     if (!userData.salesCredit) userData.salesCredit = 10;
+
+//     // ৩. নতুন ইউজার সেভ করা
+//     const result = await users.insertOne(userData);
+
+//     // ৪. রেফারাল বোনাস লজিক
+//     // if (referredByCode && result.insertedId) {
+//     //   const referrer = await users.findOne({ referralCode: referredByCode });
+
+//     //   if (referrer) {
+//     //     await users.updateOne(
+//     //       { _id: referrer._id },
+//     //       { $inc: { balance: 5 } }
+//     //     );
+//     //     console.log(`Referral Bonus $5 added to: ${referrer.email}`);
+//     //   }
+//     // }
+
+//     // রেসপন্সে insertedId এর সাথে নতুন কোডটিও পাঠিয়ে দেওয়া ভালো
+//     res.status(201).send({ 
+//       insertedId: result.insertedId, 
+//       referralCode: userData.referralCode 
+//     });
+//   } catch (e) {
+//     console.error("Register Error:", e);
+//     res.status(500).json({ message: "Error registering user", error: e.message });
+//   }
+// });
+
+// // --- LOGIN (বাকি সব আগের মতোই থাকবে) ---
+// router.post("/login", async (req, res) => {
+//   const { email, password } = req.body;
+//   const user = await users.findOne({ email });
+//   if (!user) return res.status(404).json({ success: false, message: "User not found" });
+//   // prevent blocked users from logging in
+//   if (user.status === "blocked") {
+//     return res.status(403).json({ success: false, message: "Your account has been blocked" });
+//   }
+
+//   if (user.password !== password) return res.status(400).json({ success: false, message: "Wrong password" });
+
+//   res.json({ success: true, message: "Login successful", user });
+// });
+
+// // --- GET ALL USERS ---
+// router.get("/getall", async (req, res) => {
+//   const allUsers = await users.find({}).toArray();
+//   res.send(allUsers);
+// });
+
+// // --- GET USER BY ID ---
+// router.get("/getall/:id", async (req, res) => {
+//   try {
+//     const id = new ObjectId(req.params.id);
+//     const result = await users.findOne({ _id: id });
+//     res.send(result);
+//   } catch (err) {
+//     res.status(400).send({ message: "Invalid ID" });
+//   }
+// });
+
+// // --- BECOME SELLER ---
+// router.post('/become-seller', async (req, res) => {
+//   try {
+//     const { email, amount } = req.body;
+//     const user = await users.findOne({ email: email });
+//     if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+//     const currentBalance = Number(user.balance) || 0;
+//     const fee = Number(amount);
+
+//     if (currentBalance < fee) {
+//       return res.status(400).json({ success: false, message: "Insufficient balance" });
+//     }
+
+//     const newBalance = currentBalance - fee;
+//     const result = await users.updateOne(
+//       { email: email },
+//       { $set: { balance: newBalance, role: "seller" } }
+//     );
+
+//     if (result.modifiedCount > 0) {
+//       res.status(200).json({ success: true, message: "Upgraded to Seller", newBalance });
+//     } else {
+//       res.status(400).json({ success: false, message: "Update failed" });
+//     }
+//   } catch (error) {
+//     res.status(500).json({ success: false, message: "Server Error" });
+//   }
+// });
+
+// // --- DEDUCT AND CREDIT (PLAN UPDATE) ---
+// router.post('/getall/:userId', async (req, res) => {
+//   const { userId } = req.params;
+//   const { deductAmount, creditAmount, newPlan } = req.body;
+
+//   const session = await client.startSession();
+//   try {
+//     const updatedUser = await session.withTransaction(async () => {
+//       const user = await users.findOne({ _id: new ObjectId(userId) }, { session });
+//       if (!user) throw new Error('User not found');
+//       if (user.balance < deductAmount) throw new Error('Insufficient balance');
+
+//       const update = {
+//         $inc: { balance: -deductAmount, salesCredit: creditAmount }
+//       };
+//       if (newPlan) update.$set = { subscribedPlan: newPlan };
+
+//       await users.updateOne({ _id: new ObjectId(userId) }, update, { session });
+//       return await users.findOne({ _id: new ObjectId(userId) }, { session });
+//     });
+
+//     res.json({ success: true, newBalance: updatedUser.balance });
+//   } catch (error) {
+//     res.status(400).json({ message: error.message });
+//   } finally {
+//     await session.endSession();
+//   }
+// });
+
+
+
+// //seller blcok
+// // --- BLOCK/ACTIVATE USER ---
+// router.patch("/update-status/:id", async (req, res) => {
+//   try {
+//     const id = new ObjectId(req.params.id);
+//     const { status } = req.body; // 'active' or 'blocked'
+//     const result = await users.updateOne(
+//       { _id: id },
+//       { $set: { status: status } }
+//     );
+//     res.json({ success: true, message: "User status updated" });
+//   } catch (err) {
+//     res.status(500).json({ success: false, message: err.message });
+//   }
+// });
+
+// // --- CHECK USER STATUS ---
+// // GET /api/user/status?email=someone@example.com
+// router.get("/status", async (req, res) => {
+//   try {
+//     const { email } = req.query;
+//     if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+
+//     const user = await users.findOne({ email: String(email) });
+//     if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+//     res.json({ success: true, status: user.status || "active", role: user.role || "buyer" });
+//   } catch (err) {
+//     res.status(500).json({ success: false, message: err.message });
+//   }
+// });
+
+
+// module.exports = router;
+
+
 const express = require("express");
 const { MongoClient, ObjectId } = require("mongodb");
 const router = express.Router();
@@ -616,42 +809,35 @@ async function run() {
 }
 run();
 
-// --- REGISTER (FIXED & MERGED) ---
+
+// ================= REGISTER =================
 router.post("/register", async (req, res) => {
   try {
     const userData = req.body;
     const referredByCode = userData.referredBy;
 
-    // ১. ইউনিক রেফারাল কোড জেনারেট করা (যদি ফ্রন্টএন্ড থেকে না আসে)
+    // generate referral code if missing
     if (!userData.referralCode) {
-      userData.referralCode = Math.random().toString(36).substring(2, 10).toUpperCase();
+      userData.referralCode = Math.random()
+        .toString(36)
+        .substring(2, 10)
+        .toUpperCase();
     }
 
-    // ২. ডিফল্ট ফিল্ড সেট করা
-    if (!userData.balance) userData.balance = 0;
-    if (!userData.role) userData.role = "buyer";
-    if (!userData.salesCredit) userData.salesCredit = 10;
+    // default fields
+    userData.balance = userData.balance || 0;
+    userData.role = userData.role || "buyer";
+    userData.salesCredit = userData.salesCredit || 10;
 
-    // ৩. নতুন ইউজার সেভ করা
+    // referral pending system (NO AUTO BONUS)
+    userData.referredBy = referredByCode || null;
+    userData.referralStatus = referredByCode ? "pending" : null;
+
     const result = await users.insertOne(userData);
 
-    // ৪. রেফারাল বোনাস লজিক
-    if (referredByCode && result.insertedId) {
-      const referrer = await users.findOne({ referralCode: referredByCode });
-
-      if (referrer) {
-        await users.updateOne(
-          { _id: referrer._id },
-          { $inc: { balance: 5 } }
-        );
-        console.log(`Referral Bonus $5 added to: ${referrer.email}`);
-      }
-    }
-
-    // রেসপন্সে insertedId এর সাথে নতুন কোডটিও পাঠিয়ে দেওয়া ভালো
-    res.status(201).send({ 
-      insertedId: result.insertedId, 
-      referralCode: userData.referralCode 
+    res.status(201).send({
+      insertedId: result.insertedId,
+      referralCode: userData.referralCode,
     });
   } catch (e) {
     console.error("Register Error:", e);
@@ -659,28 +845,40 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// --- LOGIN (বাকি সব আগের মতোই থাকবে) ---
+
+// ================= LOGIN =================
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
+
   const user = await users.findOne({ email });
-  if (!user) return res.status(404).json({ success: false, message: "User not found" });
-  // prevent blocked users from logging in
-  if (user.status === "blocked") {
-    return res.status(403).json({ success: false, message: "Your account has been blocked" });
+  if (!user) {
+    return res.status(404).json({ success: false, message: "User not found" });
   }
 
-  if (user.password !== password) return res.status(400).json({ success: false, message: "Wrong password" });
+  if (user.status === "blocked") {
+    return res
+      .status(403)
+      .json({ success: false, message: "Your account has been blocked" });
+  }
+
+  if (user.password !== password) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Wrong password" });
+  }
 
   res.json({ success: true, message: "Login successful", user });
 });
 
-// --- GET ALL USERS ---
+
+// ================= GET ALL USERS =================
 router.get("/getall", async (req, res) => {
   const allUsers = await users.find({}).toArray();
   res.send(allUsers);
 });
 
-// --- GET USER BY ID ---
+
+// ================= GET USER BY ID =================
 router.get("/getall/:id", async (req, res) => {
   try {
     const id = new ObjectId(req.params.id);
@@ -691,28 +889,38 @@ router.get("/getall/:id", async (req, res) => {
   }
 });
 
-// --- BECOME SELLER ---
-router.post('/become-seller', async (req, res) => {
+
+// ================= BECOME SELLER =================
+router.post("/become-seller", async (req, res) => {
   try {
     const { email, amount } = req.body;
-    const user = await users.findOne({ email: email });
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    const user = await users.findOne({ email });
+
+    if (!user)
+      return res.status(404).json({ success: false, message: "User not found" });
 
     const currentBalance = Number(user.balance) || 0;
     const fee = Number(amount);
 
     if (currentBalance < fee) {
-      return res.status(400).json({ success: false, message: "Insufficient balance" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Insufficient balance" });
     }
 
     const newBalance = currentBalance - fee;
+
     const result = await users.updateOne(
-      { email: email },
+      { email },
       { $set: { balance: newBalance, role: "seller" } }
     );
 
     if (result.modifiedCount > 0) {
-      res.status(200).json({ success: true, message: "Upgraded to Seller", newBalance });
+      res.json({
+        success: true,
+        message: "Upgraded to Seller",
+        newBalance,
+      });
     } else {
       res.status(400).json({ success: false, message: "Update failed" });
     }
@@ -721,25 +929,40 @@ router.post('/become-seller', async (req, res) => {
   }
 });
 
-// --- DEDUCT AND CREDIT (PLAN UPDATE) ---
-router.post('/getall/:userId', async (req, res) => {
+
+// ================= PLAN UPDATE =================
+router.post("/getall/:userId", async (req, res) => {
   const { userId } = req.params;
   const { deductAmount, creditAmount, newPlan } = req.body;
 
   const session = await client.startSession();
   try {
     const updatedUser = await session.withTransaction(async () => {
-      const user = await users.findOne({ _id: new ObjectId(userId) }, { session });
-      if (!user) throw new Error('User not found');
-      if (user.balance < deductAmount) throw new Error('Insufficient balance');
+      const user = await users.findOne(
+        { _id: new ObjectId(userId) },
+        { session }
+      );
+
+      if (!user) throw new Error("User not found");
+      if (user.balance < deductAmount)
+        throw new Error("Insufficient balance");
 
       const update = {
-        $inc: { balance: -deductAmount, salesCredit: creditAmount }
+        $inc: { balance: -deductAmount, salesCredit: creditAmount },
       };
+
       if (newPlan) update.$set = { subscribedPlan: newPlan };
 
-      await users.updateOne({ _id: new ObjectId(userId) }, update, { session });
-      return await users.findOne({ _id: new ObjectId(userId) }, { session });
+      await users.updateOne(
+        { _id: new ObjectId(userId) },
+        update,
+        { session }
+      );
+
+      return await users.findOne(
+        { _id: new ObjectId(userId) },
+        { session }
+      );
     });
 
     res.json({ success: true, newBalance: updatedUser.balance });
@@ -751,38 +974,97 @@ router.post('/getall/:userId', async (req, res) => {
 });
 
 
-
-//seller blcok
-// --- BLOCK/ACTIVATE USER ---
+// ================= BLOCK / ACTIVATE =================
 router.patch("/update-status/:id", async (req, res) => {
   try {
     const id = new ObjectId(req.params.id);
-    const { status } = req.body; // 'active' or 'blocked'
-    const result = await users.updateOne(
-      { _id: id },
-      { $set: { status: status } }
-    );
+    const { status } = req.body;
+
+    await users.updateOne({ _id: id }, { $set: { status } });
+
     res.json({ success: true, message: "User status updated" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// --- CHECK USER STATUS ---
-// GET /api/user/status?email=someone@example.com
+
+// ================= CHECK STATUS =================
 router.get("/status", async (req, res) => {
   try {
     const { email } = req.query;
-    if (!email) return res.status(400).json({ success: false, message: "Email is required" });
+    if (!email)
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is required" });
 
     const user = await users.findOne({ email: String(email) });
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    if (!user)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
 
-    res.json({ success: true, status: user.status || "active", role: user.role || "buyer" });
+    res.json({
+      success: true,
+      status: user.status || "active",
+      role: user.role || "buyer",
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
+// ================= ADMIN UPDATE REFERRAL STATUS =================
+router.patch("/admin/update-referral-status", async (req, res) => {
+  try {
+    const { userId, status } = req.body;
+
+    if (!userId || !["approved", "rejected"].includes(status)) {
+      return res.status(400).json({ message: "Invalid request" });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // already handled
+    if (user.referralStatus !== "pending") {
+      return res.status(400).json({
+        message: `Referral already ${user.referralStatus}`,
+      });
+    }
+
+    // APPROVE → add bonus
+    if (status === "approved") {
+      const referrer = await users.findOne({
+        referralCode: user.referredBy,
+      });
+
+      if (!referrer) {
+        return res.status(404).json({ message: "Referrer not found" });
+      }
+
+      await users.updateOne(
+        { _id: referrer._id },
+        { $inc: { balance: 5 } }
+      );
+    }
+
+    // update referral status
+    await users.updateOne(
+      { _id: user._id },
+      { $set: { referralStatus: status } }
+    );
+
+    res.json({
+      success: true,
+      message: `Referral ${status} successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 
 
 module.exports = router;
