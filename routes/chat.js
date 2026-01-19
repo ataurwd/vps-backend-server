@@ -312,90 +312,149 @@
 
 //ArifurRahman Final Updated Code Below
 
-// routes/chat.js
+
+
+
+
+
 const express = require("express");
 const { MongoClient, ObjectId } = require("mongodb");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+
 const router = express.Router();
 
 const MONGO_URI = process.env.MONGO_URI;
 const client = new MongoClient(MONGO_URI);
 
+/* ===============================
+   Ensure uploads folder exists
+================================ */
+const uploadDir = path.join(__dirname, "../uploads");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+/* ===============================
+   Multer config
+================================ */
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + "-" + file.originalname);
+  },
+});
+
+const upload = multer({ storage });
+
 async function run() {
   try {
     await client.connect();
     const db = client.db("mydb");
+
     const chatCollection = db.collection("chatCollection");
     const presenceCollection = db.collection("presenceCollection");
     const notificationCollection = db.collection("notifiCollection");
 
-    // TTL Indexes
-    await chatCollection.createIndex({ timestamp: 1 }, { expireAfterSeconds: 2592000 }); // 30 days
-    await presenceCollection.createIndex({ lastSeen: 1 }, { expireAfterSeconds: 3600 }); // 1 hour
+    /* ===============================
+       TTL Index
+    ================================ */
+    await chatCollection.createIndex(
+      { timestamp: 1 },
+      { expireAfterSeconds: 2592000 }
+    );
 
-    // ----------------------
-    // 1. POST: Send Message
-    // ----------------------
-    router.post("/send", async (req, res) => {
+    await presenceCollection.createIndex(
+      { lastSeen: 1 },
+      { expireAfterSeconds: 3600 }
+    );
+
+    /* ===============================
+       POST: Send Message
+    ================================ */
+    router.post("/send", upload.single("image"), async (req, res) => {
       try {
-        const { senderId, receiverId, message, orderId } = req.body || {};
-        if (!senderId || !receiverId || !message || !orderId) {
-          return res.status(400).json({ error: "All fields including 'orderId' are required" });
+        console.log("BODY:", req.body);
+        console.log("FILE:", req.file);
+
+        const { senderId, receiverId, orderId } = req.body;
+        const message = req.body.message || "";
+
+        if (!senderId || !receiverId || !orderId) {
+          return res.status(400).json({
+            error: "senderId, receiverId and orderId are required",
+          });
         }
 
-        const newMessage = { senderId, receiverId, message, orderId, timestamp: new Date() };
+        const imageUrl = req.file
+          ? `/uploads/${req.file.filename}`
+          : null;
+
+        const newMessage = {
+          senderId: senderId.toString(),
+          receiverId: receiverId.toString(),
+          orderId: orderId.toString(),
+          message,
+          imageUrl,
+          timestamp: new Date(),
+        };
+
         const result = await chatCollection.insertOne(newMessage);
 
-        // Update sender presence
-        try {
-          await presenceCollection.updateOne(
-            { userId: senderId },
-            { $set: { lastSeen: new Date(), status: "online" } },
-            { upsert: true }
-          );
-        } catch (e) {}
+        /* ---- presence update ---- */
+        await presenceCollection.updateOne(
+          { userId: senderId },
+          { $set: { lastSeen: new Date(), status: "online" } },
+          { upsert: true }
+        );
 
-        // Notification for receiver
-        try {
-          await notificationCollection.insertOne({
-            userEmail: receiverId,
-            type: "chat",
-            from: senderId,
-            message,
-            orderId,
-            read: false,
-            createdAt: new Date(),
-          });
-        } catch (e) {}
+        /* ---- notification ---- */
+        await notificationCollection.insertOne({
+          userEmail: receiverId,
+          type: "chat",
+          from: senderId,
+          message: message || (imageUrl ? "[Image]" : ""),
+          orderId,
+          read: false,
+          createdAt: new Date(),
+        });
 
-        res.status(201).json({ success: true, data: result });
+        res.status(201).json({
+          success: true,
+          data: result,
+        });
       } catch (error) {
         console.error("Send Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
       }
     });
 
-    // ----------------------
-    // 2. GET: Chat History
-    // ----------------------
+    /* ===============================
+       GET: Chat History
+    ================================ */
     router.get("/history/:user1/:user2", async (req, res) => {
       try {
         const { user1, user2 } = req.params;
-        const { orderId } = req.query || {};
-        if (!orderId) return res.status(400).json({ error: "Order ID is required" });
+        const { orderId } = req.query;
 
-        const query = {
-          $and: [
-            {
-              $or: [
-                { senderId: user1, receiverId: user2 },
-                { senderId: user2, receiverId: user1 },
-              ],
-            },
-            { orderId },
-          ],
-        };
+        if (!orderId) {
+          return res.status(400).json({ error: "Order ID is required" });
+        }
 
-        const chats = await chatCollection.find(query).sort({ timestamp: 1 }).toArray();
+        const chats = await chatCollection
+          .find({
+            orderId,
+            $or: [
+              { senderId: user1, receiverId: user2 },
+              { senderId: user2, receiverId: user1 },
+            ],
+          })
+          .sort({ timestamp: 1 })
+          .toArray();
+
         res.status(200).json(chats);
       } catch (error) {
         console.error("History Error:", error);
@@ -403,13 +462,15 @@ async function run() {
       }
     });
 
-    // ----------------------
-    // 3. DELETE: Delete Message
-    // ----------------------
+    /* ===============================
+       DELETE: Message
+    ================================ */
     router.delete("/:id", async (req, res) => {
       try {
         const id = req.params.id;
-        const result = await chatCollection.deleteOne({ _id: new ObjectId(id) });
+        const result = await chatCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
         res.json(result);
       } catch (error) {
         console.error("Delete Error:", error);
@@ -417,73 +478,55 @@ async function run() {
       }
     });
 
-    // ----------------------
-    // 4. POST: Update Presence
-    // ----------------------
+    /* ===============================
+       Presence APIs
+    ================================ */
     router.post("/status", async (req, res) => {
       try {
-        const { userId, status } = req.body || {};
-        if (!userId) return res.status(400).json({ error: "userId is required" });
+        const { userId, status } = req.body;
 
-        const now = new Date();
+        if (!userId) {
+          return res.status(400).json({ error: "userId is required" });
+        }
+
         if (status === "offline") {
           await presenceCollection.updateOne(
             { userId },
             { $set: { lastSeen: new Date(0), status: "offline" } },
             { upsert: true }
           );
-          return res.status(200).json({ success: true });
+          return res.json({ success: true });
         }
 
         await presenceCollection.updateOne(
           { userId },
-          { $set: { lastSeen: now, status: "online" } },
+          { $set: { lastSeen: new Date(), status: "online" } },
           { upsert: true }
         );
-        res.status(200).json({ success: true });
+
+        res.json({ success: true });
       } catch (error) {
         console.error("Status Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
       }
     });
 
-    // ----------------------
-    // 5. GET: Presence Single User
-    // ----------------------
     router.get("/status/:userId", async (req, res) => {
       try {
         const { userId } = req.params;
         const doc = await presenceCollection.findOne({ userId });
+
         const lastSeen = doc?.lastSeen || null;
-        const online = lastSeen ? Date.now() - new Date(lastSeen).getTime() < 300000 : false;
+        const online = lastSeen
+          ? Date.now() - new Date(lastSeen).getTime() < 300000
+          : false;
+
         res.json({ userId, lastSeen, online });
       } catch (error) {
         console.error("Get Status Error:", error);
         res.status(500).json({ error: "Internal Server Error" });
       }
     });
-
-    // ----------------------
-    // 6. GET: Presence Pair Users
-    // ----------------------
-    router.get("/status/pair/:user1/:user2", async (req, res) => {
-      try {
-        const { user1, user2 } = req.params;
-        const docs = await presenceCollection.find({ userId: { $in: [user1, user2] } }).toArray();
-        const map = {};
-        [user1, user2].forEach(u => {
-          const doc = docs.find(d => d.userId === u);
-          const lastSeen = doc?.lastSeen || null;
-          const online = lastSeen ? Date.now() - new Date(lastSeen).getTime() < 300000 : false;
-          map[u] = { userId: u, lastSeen, online };
-        });
-        res.json(map);
-      } catch (error) {
-        console.error("Pair Status Error:", error);
-        res.status(500).json({ error: "Internal Server Error" });
-      }
-    });
-
   } catch (error) {
     console.error("Database connection error:", error);
   }
@@ -491,3 +534,190 @@ async function run() {
 
 run();
 module.exports = router;
+
+
+
+
+
+
+
+
+// routes/chat.js
+// const express = require("express");
+// const { MongoClient, ObjectId } = require("mongodb");
+// const router = express.Router();
+
+// const MONGO_URI = process.env.MONGO_URI;
+// const client = new MongoClient(MONGO_URI);
+
+// async function run() {
+//   try {
+//     await client.connect();
+//     const db = client.db("mydb");
+//     const chatCollection = db.collection("chatCollection");
+//     const presenceCollection = db.collection("presenceCollection");
+//     const notificationCollection = db.collection("notifiCollection");
+
+//     // TTL Indexes
+//     await chatCollection.createIndex({ timestamp: 1 }, { expireAfterSeconds: 2592000 }); // 30 days
+//     await presenceCollection.createIndex({ lastSeen: 1 }, { expireAfterSeconds: 3600 }); // 1 hour
+
+//     // ----------------------
+//     // 1. POST: Send Message
+//     // ----------------------
+//     router.post("/send", async (req, res) => {
+//       try {
+//         const { senderId, receiverId, message, orderId } = req.body || {};
+//         if (!senderId || !receiverId || !message || !orderId) {
+//           return res.status(400).json({ error: "All fields including 'orderId' are required" });
+//         }
+
+//         const newMessage = { senderId, receiverId, message, orderId, timestamp: new Date() };
+//         const result = await chatCollection.insertOne(newMessage);
+
+//         // Update sender presence
+//         try {
+//           await presenceCollection.updateOne(
+//             { userId: senderId },
+//             { $set: { lastSeen: new Date(), status: "online" } },
+//             { upsert: true }
+//           );
+//         } catch (e) {}
+
+//         // Notification for receiver
+//         try {
+//           await notificationCollection.insertOne({
+//             userEmail: receiverId,
+//             type: "chat",
+//             from: senderId,
+//             message,
+//             orderId,
+//             read: false,
+//             createdAt: new Date(),
+//           });
+//         } catch (e) {}
+
+//         res.status(201).json({ success: true, data: result });
+//       } catch (error) {
+//         console.error("Send Error:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//       }
+//     });
+
+//     // ----------------------
+//     // 2. GET: Chat History
+//     // ----------------------
+//     router.get("/history/:user1/:user2", async (req, res) => {
+//       try {
+//         const { user1, user2 } = req.params;
+//         const { orderId } = req.query || {};
+//         if (!orderId) return res.status(400).json({ error: "Order ID is required" });
+
+//         const query = {
+//           $and: [
+//             {
+//               $or: [
+//                 { senderId: user1, receiverId: user2 },
+//                 { senderId: user2, receiverId: user1 },
+//               ],
+//             },
+//             { orderId },
+//           ],
+//         };
+
+//         const chats = await chatCollection.find(query).sort({ timestamp: 1 }).toArray();
+//         res.status(200).json(chats);
+//       } catch (error) {
+//         console.error("History Error:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//       }
+//     });
+
+//     // ----------------------
+//     // 3. DELETE: Delete Message
+//     // ----------------------
+//     router.delete("/:id", async (req, res) => {
+//       try {
+//         const id = req.params.id;
+//         const result = await chatCollection.deleteOne({ _id: new ObjectId(id) });
+//         res.json(result);
+//       } catch (error) {
+//         console.error("Delete Error:", error);
+//         res.status(500).json({ error: "Could not delete message" });
+//       }
+//     });
+
+//     // ----------------------
+//     // 4. POST: Update Presence
+//     // ----------------------
+//     router.post("/status", async (req, res) => {
+//       try {
+//         const { userId, status } = req.body || {};
+//         if (!userId) return res.status(400).json({ error: "userId is required" });
+
+//         const now = new Date();
+//         if (status === "offline") {
+//           await presenceCollection.updateOne(
+//             { userId },
+//             { $set: { lastSeen: new Date(0), status: "offline" } },
+//             { upsert: true }
+//           );
+//           return res.status(200).json({ success: true });
+//         }
+
+//         await presenceCollection.updateOne(
+//           { userId },
+//           { $set: { lastSeen: now, status: "online" } },
+//           { upsert: true }
+//         );
+//         res.status(200).json({ success: true });
+//       } catch (error) {
+//         console.error("Status Error:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//       }
+//     });
+
+//     // ----------------------
+//     // 5. GET: Presence Single User
+//     // ----------------------
+//     router.get("/status/:userId", async (req, res) => {
+//       try {
+//         const { userId } = req.params;
+//         const doc = await presenceCollection.findOne({ userId });
+//         const lastSeen = doc?.lastSeen || null;
+//         const online = lastSeen ? Date.now() - new Date(lastSeen).getTime() < 300000 : false;
+//         res.json({ userId, lastSeen, online });
+//       } catch (error) {
+//         console.error("Get Status Error:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//       }
+//     });
+
+//     // ----------------------
+//     // 6. GET: Presence Pair Users
+//     // ----------------------
+//     router.get("/status/pair/:user1/:user2", async (req, res) => {
+//       try {
+//         const { user1, user2 } = req.params;
+//         const docs = await presenceCollection.find({ userId: { $in: [user1, user2] } }).toArray();
+//         const map = {};
+//         [user1, user2].forEach(u => {
+//           const doc = docs.find(d => d.userId === u);
+//           const lastSeen = doc?.lastSeen || null;
+//           const online = lastSeen ? Date.now() - new Date(lastSeen).getTime() < 300000 : false;
+//           map[u] = { userId: u, lastSeen, online };
+//         });
+//         res.json(map);
+//       } catch (error) {
+//         console.error("Pair Status Error:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//       }
+//     });
+
+//   } catch (error) {
+//     console.error("Database connection error:", error);
+//   }
+// }
+
+// run();
+// module.exports = router;
