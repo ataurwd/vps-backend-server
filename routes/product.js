@@ -69,18 +69,19 @@ router.post("/sell", async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // 🔑 Only 1 credit needed
-    if (!user.salesCredit || user.salesCredit <= 0) {
+    // Check if user has enough credits (1 credit per product)
+    const creditsNeeded = products.length;
+    if (!user.salesCredit || user.salesCredit < creditsNeeded) {
       return res.status(403).json({
         message:
-          "Insufficient listing credits. Please purchase more credits.",
+          `Insufficient listing credits. You need ${creditsNeeded} credit(s) but only have ${user.salesCredit || 0}. Please purchase more credits.`,
       });
     }
 
-    // Deduct ONLY 1 credit
+    // Deduct credits equal to number of products
     await userCollection.updateOne(
       { email: userEmail },
-      { $inc: { salesCredit: -1 } }
+      { $inc: { salesCredit: -creditsNeeded } }
     );
 
     // 🔥 INSERT ALL PRODUCTS (same title allowed)
@@ -95,7 +96,7 @@ router.post("/sell", async (req, res) => {
     res.status(201).json({
       acknowledged: true,
       insertedCount: result.insertedCount,
-      message: `${result.insertedCount} products added successfully (same title allowed). 1 credit deducted.`,
+      message: `${result.insertedCount} product(s) added successfully. ${creditsNeeded} credit(s) deducted.`,
     });
   } catch (error) {
     console.error("SELL ERROR:", error);
