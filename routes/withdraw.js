@@ -531,13 +531,14 @@ let cartCollection; // We'll assign this after successful connection
 let userCollection;
 let withdrawalCollection;
 let notificationCollection;
-
+let db;
 // Connect to MongoDB once when the module loads
 (async () => {
     try {
         await client.connect();
 
-        const db = client.db("mydb");
+        // const db = client.db("mydb");
+        db = client.db("mydb");
         cartCollection = db.collection("withdraw"); 
         userCollection = db.collection("userCollection");
         withdrawalCollection = db.collection("withdraw");
