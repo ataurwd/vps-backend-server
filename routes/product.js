@@ -27,9 +27,21 @@ const userCollection = db.collection("userCollection");
 
 router.post("/sell", async (req, res) => {
   try {
-    const data = req.body;
+    const { products } = req.body;
 
-    // Required fields validation (optional but recommended)
+    // 🔴 STRICT: only array accepted
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({
+        message: "products must be a non-empty array",
+      });
+    }
+
+    const userEmail = products[0].userEmail;
+    if (!userEmail) {
+      return res.status(400).json({ message: "userEmail is required" });
+    }
+
+    // Required fields (same as your old logic)
     const requiredFields = [
       "category",
       "name",
@@ -41,56 +53,59 @@ router.post("/sell", async (req, res) => {
       "userAccountName",
     ];
 
-    for (const field of requiredFields) {
-      if (!data[field]) {
-        return res.status(400).json({ message: `${field} is required` });
+    for (const product of products) {
+      for (const field of requiredFields) {
+        if (!product[field]) {
+          return res.status(400).json({
+            message: `${field} is required`,
+          });
+        }
       }
     }
 
-    // Default status
-    if (!data.status) data.status = "pending";
-
-    // Find the user by email
-    const user = await userCollection.findOne({ email: data.userEmail });
-
+    // Find user
+    const user = await userCollection.findOne({ email: userEmail });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check salesCredit
+    // 🔑 Only 1 credit needed
     if (!user.salesCredit || user.salesCredit <= 0) {
-      return res
-        .status(403)
-        .json({ message: "Insufficient listing credits. Please purchase more credits to list an account." });
+      return res.status(403).json({
+        message:
+          "Insufficient listing credits. Please purchase more credits.",
+      });
     }
 
-    // Deduct 1 credit (using update + insert in transaction is better, but simple way here)
-    const updateUser = await userCollection.updateOne(
-      { email: data.userEmail },
+    // Deduct ONLY 1 credit
+    await userCollection.updateOne(
+      { email: userEmail },
       { $inc: { salesCredit: -1 } }
     );
 
-    if (updateUser.modifiedCount === 0) {
-      return res.status(500).json({ message: "Failed to update user credits" });
-    }
-
-    // Insert the product
-    const result = await productCollection.insertOne({
-      ...data,
+    // 🔥 INSERT ALL PRODUCTS (same title allowed)
+    const formattedProducts = products.map((p) => ({
+      ...p,
+      status: p.status || "pending",
       createdAt: new Date(),
-    });
+    }));
 
-    // Success response
+    const result = await productCollection.insertMany(formattedProducts);
+
     res.status(201).json({
       acknowledged: true,
-      insertedId: result.insertedId,
-      message: "Product listed successfully. 1 listing credit deducted.",
+      insertedCount: result.insertedCount,
+      message: `${result.insertedCount} products added successfully (same title allowed). 1 credit deducted.`,
     });
   } catch (error) {
-    console.error("Error in /sell route:", error);
-    res.status(500).json({ message: "Server error while listing product" });
+    console.error("SELL ERROR:", error);
+    res.status(500).json({
+      message: "Server error while listing products",
+    });
   }
 });
+
+
 
 
 router.get("/all-sells", async (req, res) => {
