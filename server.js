@@ -1,7 +1,7 @@
 const cron = require("node-cron");
 const express = require("express");
 const cors = require("cors");
-const path = require("path"); // ১. পাথ মডিউল ইমপোর্ট করা হয়েছে
+const path = require("path"); // ইমেজ পাথের জন্য এটি যোগ করা হয়েছে
 require("dotenv").config();
 const { MongoClient, ObjectId } = require("mongodb");
 
@@ -20,7 +20,7 @@ app.use(
 
 app.use(cors());
 
-// ২. 'uploads' ফোল্ডারকে স্ট্যাটিক হিসেবে ঘোষণা করা হয়েছে যাতে ইমেজ শো করে
+// --- ইমেজ শো করার জন্য নিচের এই লাইনটি যোগ করা হয়েছে ---
 app.use("/uploads", express.static(path.join(__dirname, "uploads"))); 
 
 // ---------------------------------------
@@ -74,6 +74,7 @@ const cartRoute = require("./routes/cart");
 const testPaymentRoute = require("./routes/testpayment");
 const withdrawRoute = require("./routes/withdraw");
 const purchaseRoute = require("./routes/purchase");
+const refarelRoute = require("./routes/refarel");
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
@@ -208,7 +209,7 @@ app.get("/icon-data", async (req, res) => {
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 3200;
   app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
@@ -234,6 +235,7 @@ cron.schedule(
 // EXPORT FOR VERCEL
 // ---------------------------------------
 module.exports = app;
+
 
 // const cron = require("node-cron");
 // const express = require("express");
