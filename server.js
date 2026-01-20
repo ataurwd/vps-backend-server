@@ -75,6 +75,7 @@ const testPaymentRoute = require("./routes/testpayment");
 const withdrawRoute = require("./routes/withdraw");
 const purchaseRoute = require("./routes/purchase");
 const refarelRoute = require("./routes/refarel");
+const ratingRoute = require("./routes/rating");
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
@@ -87,6 +88,7 @@ app.use("/cart", cartRoute);
 app.use("/api", testPaymentRoute);
 app.use("/withdraw", withdrawRoute);
 app.use("/purchase", purchaseRoute);
+app.use("/rating", ratingRoute);
 
 // ---------------------------------------
 // PAYMENTS API
