@@ -153,6 +153,54 @@ router.patch("/update-status/:id", async (req, res) => {
 });
 
 
+// UPDATE PRODUCT DETAILS (for resubmitting denied ads)
+router.patch("/update/:id", async (req, res) => {
+    const id = req.params.id;
+    const { username, accountPass, email, password, previewLink, additionalInfo, status } = req.body;
+
+    try {
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).send({ message: "Invalid ID format" });
+        }
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+            $set: {
+                username: username || undefined,
+                accountPass: accountPass || undefined,
+                email: email || undefined,
+                password: password || undefined,
+                previewLink: previewLink || undefined,
+                additionalInfo: additionalInfo || undefined,
+                status: status || "pending",
+                rejectReason: "", // Clear rejection reason on resubmit
+                updatedAt: new Date() // Add timestamp to show as recent
+            },
+        };
+
+        // Remove undefined fields
+        Object.keys(updateDoc.$set).forEach(key => 
+            updateDoc.$set[key] === undefined && delete updateDoc.$set[key]
+        );
+
+        const result = await productCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+            return res.status(404).send({ message: "Product not found" });
+        }
+
+        res.status(200).send({ 
+            message: "Product updated successfully", 
+            success: true,
+            modifiedCount: result.modifiedCount 
+        });
+    } catch (error) {
+        console.error("Update Error:", error);
+        res.status(500).send({ message: "Internal server error" });
+    }
+});
+
+
 
 // DELETE API
 router.delete("/delete/:id", async (req, res) => {
