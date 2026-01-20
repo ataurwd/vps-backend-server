@@ -435,35 +435,76 @@ router.get("/report/getall", async (req, res) => {
 router.post("/post", async (req, res) => {
   const { email: buyerEmail } = req.body;
 
-  if (!buyerEmail) return res.status(400).json({ success: false, message: "Buyer email required" });
+  if (!buyerEmail) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Buyer email required" });
+  }
 
   try {
-    const cartItems = await cartCollection.find({ UserEmail: buyerEmail }).toArray();
-    if (!cartItems.length) return res.status(400).json({ success: false, message: "Cart is empty" });
+    const cartItems = await cartCollection
+      .find({ UserEmail: buyerEmail })
+      .toArray();
 
-    const totalPrice = cartItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
-    const buyer = await userCollection.findOne({ email: buyerEmail });
-
-    if (!buyer || Number(buyer.balance || 0) < totalPrice) {
-      return res.status(400).json({ success: false, message: "Insufficient balance", required: totalPrice, available: buyer?.balance || 0 });
+    if (!cartItems.length) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Cart is empty" });
     }
 
-    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -totalPrice } });
+    const buyer = await userCollection.findOne({ email: buyerEmail });
+    if (!buyer) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Buyer not found" });
+    }
 
+    const totalPrice = cartItems.reduce(
+      (sum, item) => sum + Number(item.price || 0),
+      0
+    );
+
+    if (Number(buyer.balance || 0) < totalPrice) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient balance",
+        required: totalPrice,
+        available: buyer.balance || 0,
+      });
+    }
+
+    // 1️⃣ Deduct buyer balance
+    await userCollection.updateOne(
+      { email: buyerEmail },
+      { $inc: { balance: -totalPrice } }
+    );
+
+    // 2️⃣ Create purchase docs (✅ buyerId added)
     const purchaseDocs = cartItems.map((item) => ({
+      buyerId: buyer._id, // ✅ VERY IMPORTANT
       buyerEmail,
       productName: item.name,
       price: Number(item.price),
       sellerEmail: item.sellerEmail,
-      productId: item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null),
+      productId: item.productId
+        ? new ObjectId(item.productId)
+        : item._id
+        ? new ObjectId(item._id)
+        : null,
       purchaseDate: new Date(),
       status: "pending",
     }));
 
     await purchaseCollection.insertMany(purchaseDocs);
 
+    // 3️⃣ Update product status
     const productUpdatePromises = cartItems.map(async (item) => {
-      const productObjectId = item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null);
+      const productObjectId = item.productId
+        ? new ObjectId(item.productId)
+        : item._id
+        ? new ObjectId(item._id)
+        : null;
+
       if (productObjectId) {
         await productsCollection.updateOne(
           { _id: productObjectId },
@@ -473,13 +514,15 @@ router.post("/post", async (req, res) => {
     });
 
     await Promise.all(productUpdatePromises);
+
+    // 4️⃣ Clear cart
     await cartCollection.deleteMany({ UserEmail: buyerEmail });
 
     res.json({
       success: true,
       message: "Purchase successful!",
       totalDeducted: totalPrice,
-      newBalance: Number(buyer.balance) - totalPrice
+      newBalance: Number(buyer.balance) - totalPrice,
     });
   } catch (err) {
     console.error("❌ Cart Purchase error:", err);
@@ -487,49 +530,175 @@ router.post("/post", async (req, res) => {
   }
 });
 
+// router.post("/post", async (req, res) => {
+//   const { email: buyerEmail } = req.body;
+
+//   if (!buyerEmail) return res.status(400).json({ success: false, message: "Buyer email required" });
+
+//   try {
+//     const cartItems = await cartCollection.find({ UserEmail: buyerEmail }).toArray();
+//     if (!cartItems.length) return res.status(400).json({ success: false, message: "Cart is empty" });
+
+//     const totalPrice = cartItems.reduce((sum, item) => sum + Number(item.price || 0), 0);
+//     const buyer = await userCollection.findOne({ email: buyerEmail });
+
+//     if (!buyer || Number(buyer.balance || 0) < totalPrice) {
+//       return res.status(400).json({ success: false, message: "Insufficient balance", required: totalPrice, available: buyer?.balance || 0 });
+//     }
+
+//     await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -totalPrice } });
+
+//     const purchaseDocs = cartItems.map((item) => ({
+//       buyerEmail,
+//       productName: item.name,
+//       price: Number(item.price),
+//       sellerEmail: item.sellerEmail,
+//       productId: item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null),
+//       purchaseDate: new Date(),
+//       status: "pending",
+//     }));
+
+//     await purchaseCollection.insertMany(purchaseDocs);
+
+//     const productUpdatePromises = cartItems.map(async (item) => {
+//       const productObjectId = item.productId ? new ObjectId(item.productId) : (item._id ? new ObjectId(item._id) : null);
+//       if (productObjectId) {
+//         await productsCollection.updateOne(
+//           { _id: productObjectId },
+//           { $set: { status: "ongoing" } }
+//         );
+//       }
+//     });
+
+//     await Promise.all(productUpdatePromises);
+//     await cartCollection.deleteMany({ UserEmail: buyerEmail });
+
+//     res.json({
+//       success: true,
+//       message: "Purchase successful!",
+//       totalDeducted: totalPrice,
+//       newBalance: Number(buyer.balance) - totalPrice
+//     });
+//   } catch (err) {
+//     console.error("❌ Cart Purchase error:", err);
+//     res.status(500).json({ success: false, message: "Server error" });
+//   }
+// });
+
+
+// ✅ ADMIN: GET purchases by buyer (FINAL & SAFE)
+router.get("/admin/by-user/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!ObjectId.isValid(userId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid user id" });
+    }
+
+    // 1️⃣ user খুঁজে বের করি
+    const user = await userCollection.findOne({
+      _id: new ObjectId(userId),
+    });
+
+    if (!user) {
+      return res.status(200).json([]);
+    }
+
+    // 2️⃣ MAIN FIX: buyerId + buyerEmail দুটো দিয়েই খুঁজি
+    const purchases = await purchaseCollection
+      .find({
+        $or: [
+          { buyerId: user._id },
+          { buyerEmail: user.email },
+        ],
+      })
+      .sort({ purchaseDate: -1 })
+      .toArray();
+
+    res.status(200).json(purchases);
+  } catch (error) {
+    console.error("❌ Admin fetch orders error:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch orders" });
+  }
+});
+
+
 // =======================================================
 // POST /purchase/single-purchase (Direct Buy)
 // =======================================================
 router.post("/single-purchase", async (req, res) => {
   try {
-
     const { buyerEmail, productName, price, sellerEmail, productId } = req.body;
 
-
-
     if (!buyerEmail || !productName || !price || !productId) {
-      return res.status(400).json({ success: false, message: "Required fields are missing" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Required fields are missing" });
     }
 
     const amount = Number(price);
-    const buyer = await userCollection.findOne({ email: buyerEmail });
 
-    if (!buyer || (buyer.balance || 0) < amount) {
-      return res.status(400).json({ success: false, message: "Insufficient balance" });
+    // 1️⃣ Find buyer
+    const buyer = await userCollection.findOne({ email: buyerEmail });
+    if (!buyer) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Buyer not found" });
     }
 
+    if ((buyer.balance || 0) < amount) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Insufficient balance" });
+    }
+
+    // 2️⃣ Find product
     const productObjectId = new ObjectId(productId);
     const product = await productsCollection.findOne({ _id: productObjectId });
 
     if (!product || product.status !== "active") {
-      return res.status(400).json({ success: false, message: "Product is not available" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Product is not available" });
     }
 
-    await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -amount } });
+    // 3️⃣ Deduct buyer balance
+    await userCollection.updateOne(
+      { email: buyerEmail },
+      { $inc: { balance: -amount } }
+    );
 
+    // 4️⃣ Create purchase (✅ buyerId added)
     const purchaseData = {
+      buyerId: buyer._id,              // ✅ VERY IMPORTANT
       buyerEmail,
       productName,
       price: amount,
       sellerEmail: sellerEmail || "admin@example.com",
       productId: productObjectId,
       purchaseDate: new Date(),
-      status: "pending"
+      status: "pending",
     };
 
     const result = await purchaseCollection.insertOne(purchaseData);
-    await productsCollection.updateOne({ _id: productObjectId }, { $set: { status: "ongoing" } });
-    await userCollection.updateOne({ email: sellerEmail }, { $inc: { balance: amount } });
+
+    // 5️⃣ Update product status
+    await productsCollection.updateOne(
+      { _id: productObjectId },
+      { $set: { status: "ongoing" } }
+    );
+
+    // 6️⃣ Credit seller balance (if exists)
+    if (sellerEmail) {
+      await userCollection.updateOne(
+        { email: sellerEmail },
+        { $inc: { balance: amount } }
+      );
+    }
 
     const updatedBuyer = await userCollection.findOne({ email: buyerEmail });
 
@@ -537,14 +706,71 @@ router.post("/single-purchase", async (req, res) => {
       success: true,
       message: "Purchase successful",
       purchaseId: result.insertedId,
-      newBuyerBalance: updatedBuyer?.balance || 0
+      newBuyerBalance: updatedBuyer?.balance || 0,
     });
-
   } catch (error) {
     console.error("❌ Single Purchase Error:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    res
+      .status(500)
+      .json({ success: false, message: "Internal Server Error" });
   }
 });
+
+// router.post("/single-purchase", async (req, res) => {
+//   try {
+
+//     const { buyerEmail, productName, price, sellerEmail, productId } = req.body;
+
+
+
+//     if (!buyerEmail || !productName || !price || !productId) {
+//       return res.status(400).json({ success: false, message: "Required fields are missing" });
+//     }
+
+//     const amount = Number(price);
+//     const buyer = await userCollection.findOne({ email: buyerEmail });
+
+//     if (!buyer || (buyer.balance || 0) < amount) {
+//       return res.status(400).json({ success: false, message: "Insufficient balance" });
+//     }
+
+//     const productObjectId = new ObjectId(productId);
+//     const product = await productsCollection.findOne({ _id: productObjectId });
+
+//     if (!product || product.status !== "active") {
+//       return res.status(400).json({ success: false, message: "Product is not available" });
+//     }
+
+//     await userCollection.updateOne({ email: buyerEmail }, { $inc: { balance: -amount } });
+
+//     const purchaseData = {
+//       buyerEmail,
+//       productName,
+//       price: amount,
+//       sellerEmail: sellerEmail || "admin@example.com",
+//       productId: productObjectId,
+//       purchaseDate: new Date(),
+//       status: "pending"
+//     };
+
+//     const result = await purchaseCollection.insertOne(purchaseData);
+//     await productsCollection.updateOne({ _id: productObjectId }, { $set: { status: "ongoing" } });
+//     await userCollection.updateOne({ email: sellerEmail }, { $inc: { balance: amount } });
+
+//     const updatedBuyer = await userCollection.findOne({ email: buyerEmail });
+
+//     res.status(200).json({
+//       success: true,
+//       message: "Purchase successful",
+//       purchaseId: result.insertedId,
+//       newBuyerBalance: updatedBuyer?.balance || 0
+//     });
+
+//   } catch (error) {
+//     console.error("❌ Single Purchase Error:", error);
+//     res.status(500).json({ success: false, message: "Internal Server Error" });
+//   }
+// });
 
 // =======================================================
 // GET /purchase/getall (Buyer & Seller এর জন্য একটিই ক্লিন রাউট)
