@@ -88,6 +88,7 @@ app.use("/cart", cartRoute);
 app.use("/api", testPaymentRoute);
 app.use("/withdraw", withdrawRoute);
 app.use("/purchase", purchaseRoute);
+app.use("/referral", refarelRoute);
 app.use("/rating", ratingRoute);
 
 // ---------------------------------------

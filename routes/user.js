@@ -835,6 +835,35 @@ router.post("/register", async (req, res) => {
 
     const result = await users.insertOne(userData);
 
+    // Create referral record if referred by someone
+    if (referredByCode && result.insertedId) {
+      try {
+        const referrer = await users.findOne({ referralCode: referredByCode });
+        if (referrer) {
+          const referralsCollection = db.collection("referrals");
+          await referralsCollection.insertOne({
+            referrerId: referrer._id,
+            referrerEmail: referrer.email,
+            referrerName: referrer.name || "Unknown",
+            refereeId: result.insertedId,
+            refereeEmail: userData.email,
+            refereeName: userData.name || "Unknown",
+            refereeRole: userData.role || "buyer",
+            referralCode: referredByCode,
+            status: "pending", // Requires admin approval
+            amount: 5,
+            createdAt: new Date(),
+            approvedAt: null,
+            rejectedAt: null
+          });
+          console.log(`Referral record created for: ${referrer.email} → ${userData.email}`);
+        }
+      } catch (refErr) {
+        console.error("Error creating referral record:", refErr);
+        // Don't fail registration if referral record creation fails
+      }
+    }
+
     res.status(201).send({
       insertedId: result.insertedId,
       referralCode: userData.referralCode,
