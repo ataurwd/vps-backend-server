@@ -76,6 +76,7 @@ const withdrawRoute = require("./routes/withdraw");
 const purchaseRoute = require("./routes/purchase");
 const refarelRoute = require("./routes/refarel");
 const ratingRoute = require("./routes/rating");
+const adminsetingRoute = require("./routes/adminseting");
 
 app.use("/flutterwave", flutterwaveRoutes);
 app.use("/korapay", korapayRoutes);
