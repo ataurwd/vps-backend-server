@@ -555,7 +555,7 @@ router.post("/post", async (req, res) => {
   try {
     const {
       userId,
-      paymentMethod,     // "kora" | "flutterwave"
+      paymentMethod,     // "kora" | "flutterwave" | "localbank"
       amount,
       currency = "NGN",
       accountNumber,
@@ -563,7 +563,8 @@ router.post("/post", async (req, res) => {
       fullName,
       phoneNumber,
       email,
-      note
+      note,
+      bankName
     } = req.body;
 
     // Validation
@@ -631,6 +632,7 @@ router.post("/post", async (req, res) => {
           accountNumber,
           bankCode,
           fullName,
+          bankName: bankName || null,
           phoneNumber: phoneNumber || null,
           email: email || user.email,
           note: note || "",
