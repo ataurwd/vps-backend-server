@@ -462,21 +462,21 @@ async function run() {
       }
     });
 
-    /* ===============================
-       DELETE: Message
-    ================================ */
-    router.delete("/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const result = await chatCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-        res.json(result);
-      } catch (error) {
-        console.error("Delete Error:", error);
-        res.status(500).json({ error: "Could not delete message" });
-      }
-    });
+    // /* ===============================
+    //    DELETE: Message
+    // ================================ */
+    // router.delete("/:id", async (req, res) => {
+    //   try {
+    //     const id = req.params.id;
+    //     const result = await chatCollection.deleteOne({
+    //       _id: new ObjectId(id),
+    //     });
+    //     res.json(result);
+    //   } catch (error) {
+    //     console.error("Delete Error:", error);
+    //     res.status(500).json({ error: "Could not delete message" });
+    //   }
+    // });
 
     /* ===============================
        Presence APIs
