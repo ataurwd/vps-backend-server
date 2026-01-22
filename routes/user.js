@@ -1095,5 +1095,84 @@ router.patch("/admin/update-referral-status", async (req, res) => {
 });
 
 
+// ================= SAVE BANK ACCOUNT DETAILS =================
+router.post("/save-bank-account", async (req, res) => {
+  try {
+    const { userId, accountNumber, bankCode, fullName, bankName, phoneNumber } = req.body;
+
+    if (!userId || !accountNumber || !bankCode || !fullName || !bankName) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: userId, accountNumber, bankCode, fullName, bankName"
+      });
+    }
+
+    const bankDetails = {
+      accountNumber: accountNumber.trim(),
+      bankCode: bankCode.trim(),
+      fullName: fullName.trim(),
+      bankName: bankName.trim(),
+      phoneNumber: phoneNumber?.trim() || null,
+      savedAt: new Date()
+    };
+
+    const result = await users.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { savedBankAccount: bankDetails } }
+    );
+
+    if (result.modifiedCount > 0) {
+      res.json({
+        success: true,
+        message: "Bank account details saved successfully",
+        bankDetails
+      });
+    } else {
+      res.status(400).json({ success: false, message: "Failed to save bank details" });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+
+// ================= GET SAVED BANK ACCOUNT DETAILS =================
+router.get("/get-bank-account/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required"
+      });
+    }
+
+    const user = await users.findOne({ _id: new ObjectId(userId) });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    if (!user.savedBankAccount) {
+      return res.json({
+        success: true,
+        bankDetails: null,
+        message: "No saved bank account found"
+      });
+    }
+
+    res.json({
+      success: true,
+      bankDetails: user.savedBankAccount
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 
 module.exports = router;
