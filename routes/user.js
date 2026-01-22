@@ -1175,4 +1175,61 @@ router.get("/get-bank-account/:userId", async (req, res) => {
 });
 
 
+// ================= UPDATE PASSWORD =================
+router.put("/update-password", async (req, res) => {
+  try {
+    const { email, currentPassword, newPassword } = req.body;
+
+    if (!email || !currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Email, current password, and new password are required"
+      });
+    }
+
+    // Find user by email
+    const user = await users.findOne({ email: email.trim() });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Verify current password
+    if (user.password !== currentPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "Current password is incorrect"
+      });
+    }
+
+    // Update password
+    const result = await users.updateOne(
+      { email: email.trim() },
+      { $set: { password: newPassword } }
+    );
+
+    if (result.modifiedCount > 0) {
+      res.json({
+        success: true,
+        message: "Password updated successfully"
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: "Failed to update password"
+      });
+    }
+  } catch (error) {
+    console.error("Update password error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+
 module.exports = router;
