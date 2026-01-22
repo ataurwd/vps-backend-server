@@ -259,6 +259,104 @@ router.delete("/delete/:id", async (req, res) => {
     }
 });
 
+// TOGGLE PRODUCT VISIBILITY
+router.patch("/toggle-visibility/:id", async (req, res) => {
+    const id = req.params.id;
+    const { isVisible } = req.body;
+
+    try {
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid product ID" });
+        }
+
+        if (typeof isVisible !== 'boolean') {
+            return res.status(400).json({ message: "isVisible must be a boolean" });
+        }
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+            $set: {
+                isVisible: isVisible,
+                updatedAt: new Date()
+            },
+        };
+
+        const result = await productCollection.updateOne(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ message: "Product not found" });
+        }
+
+        res.status(200).json({ 
+            message: isVisible ? "Product visibility enabled" : "Product visibility disabled",
+            success: true,
+            modifiedCount: result.modifiedCount 
+        });
+    } catch (error) {
+        console.error("Toggle visibility error:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+// TOGGLE ALL PRODUCTS VISIBILITY BY USER EMAIL
+router.patch("/toggle-all-visibility", async (req, res) => {
+    const { userEmail, isVisible } = req.body;
+
+    try {
+        if (!userEmail) {
+            return res.status(400).json({ message: "userEmail is required" });
+        }
+
+        if (typeof isVisible !== 'boolean') {
+            return res.status(400).json({ message: "isVisible must be a boolean" });
+        }
+
+        const filter = { userEmail: userEmail };
+        const updateDoc = {
+            $set: {
+                isVisible: isVisible,
+                updatedAt: new Date()
+            },
+        };
+
+        const result = await productCollection.updateMany(filter, updateDoc);
+
+        if (result.matchedCount === 0) {
+            return res.status(404).json({ message: "No products found for this user" });
+        }
+
+        res.status(200).json({ 
+            message: isVisible ? "All products visibility enabled" : "All products visibility disabled",
+            success: true,
+            modifiedCount: result.modifiedCount 
+        });
+    } catch (error) {
+        console.error("Toggle all visibility error:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+// GET USER PRODUCTS (for listings page)
+router.get("/user-products/:email", async (req, res) => {
+    const { email } = req.params;
+
+    try {
+        if (!email) {
+            return res.status(400).json({ message: "User email is required" });
+        }
+
+        const products = await productCollection.find({ userEmail: email }).sort({ _id: -1 }).toArray();
+
+        res.status(200).json({
+            success: true,
+            products: products
+        });
+    } catch (error) {
+        console.error("Error fetching user products:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+
 
 module.exports = router;
 
