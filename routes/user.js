@@ -1253,5 +1253,151 @@ router.put("/update-password", async (req, res) => {
   }
 });
 
+// ================= UPDATE PROFILE =================
+router.put("/update-profile", async (req, res) => {
+  try {
+    const { email, name, phone, country, state, city, address, dob } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required"
+      });
+    }
+
+    // Find user by email
+    const user = await users.findOne({ email: email.trim() });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    // Build update object with provided fields
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (phone !== undefined) updateData.phone = phone;
+    if (country !== undefined) updateData.country = country;
+    if (state !== undefined) updateData.state = state;
+    if (city !== undefined) updateData.city = city;
+    if (address !== undefined) updateData.address = address;
+    if (dob !== undefined) updateData.dob = dob;
+
+    // Update profile
+    const result = await users.updateOne(
+      { email: email.trim() },
+      { $set: updateData }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Fetch updated user data
+      const updatedUser = await users.findOne({ email: email.trim() });
+      res.json({
+        success: true,
+        message: "Profile updated successfully",
+        user: updatedUser
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: "No changes made or user not found"
+      });
+    }
+  } catch (error) {
+    console.error("Update profile error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// --- LOG USER ACCOUNT CHANGES ---
+router.post("/log-change", async (req, res) => {
+  try {
+    const { userEmail, fieldName, oldValue, newValue, changeType } = req.body;
+    
+    if (!userEmail || !fieldName) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    const changesCollection = db.collection("accountChanges");
+    
+    const changeRecord = {
+      userEmail,
+      fieldName,
+      oldValue,
+      newValue,
+      changeType: changeType || "update", // update, delete, create, etc.
+      timestamp: new Date(),
+      ipAddress: req.ip || req.headers['x-forwarded-for'] || 'unknown'
+    };
+
+    const result = await changesCollection.insertOne(changeRecord);
+    res.json({
+      success: true,
+      message: "Change logged successfully",
+      changeId: result.insertedId
+    });
+  } catch (error) {
+    console.error("Error logging change:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- GET USER ACCOUNT CHANGES (FOR ADMIN) ---
+router.get("/changes/:userEmail", async (req, res) => {
+  try {
+    const { userEmail } = req.params;
+    const changesCollection = db.collection("accountChanges");
+    
+    const changes = await changesCollection
+      .find({ userEmail })
+      .sort({ timestamp: -1 })
+      .toArray();
+
+    res.json({
+      success: true,
+      userEmail,
+      totalChanges: changes.length,
+      changes
+    });
+  } catch (error) {
+    console.error("Error fetching changes:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// --- GET ALL ACCOUNT CHANGES (FOR ADMIN OVERVIEW) ---
+router.get("/all-changes/admin/list", async (req, res) => {
+  try {
+    const changesCollection = db.collection("accountChanges");
+    const limit = parseInt(req.query.limit) || 100;
+    const skip = parseInt(req.query.skip) || 0;
+    
+    const changes = await changesCollection
+      .find({})
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    const total = await changesCollection.countDocuments({});
+
+    res.json({
+      success: true,
+      total,
+      limit,
+      skip,
+      changes
+    });
+  } catch (error) {
+    console.error("Error fetching all changes:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 
 module.exports = router;
