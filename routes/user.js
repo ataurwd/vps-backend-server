@@ -816,6 +816,28 @@ router.post("/register", async (req, res) => {
     const userData = req.body;
     const referredByCode = userData.referredBy;
 
+    // ===== CHECK IF NAME (USERNAME) ALREADY EXISTS (CASE-INSENSITIVE) =====
+    if (userData.name) {
+      const existingName = await users.findOne({ 
+        name: { $regex: `^${userData.name}$`, $options: "i" } 
+      });
+      if (existingName) {
+        return res.status(409).json({
+          success: false,
+          message: "The username has been taken!"
+        });
+      }
+    }
+
+    // ===== CHECK IF EMAIL ALREADY EXISTS =====
+    const existingEmail = await users.findOne({ email: userData.email });
+    if (existingEmail) {
+      return res.status(409).json({
+        success: false,
+        message: "The email has been taken!"
+      });
+    }
+
     // generate referral code if missing
     if (!userData.referralCode) {
       userData.referralCode = Math.random()
